@@ -15,6 +15,8 @@
 #include <linux/tcp.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <stdarg.h>
 
 #include <openssl/err.h>
 #include <openssl/ssl.h>
@@ -22,6 +24,15 @@
 #include <openssl/rand.h>
 
 #define SMKEX_MAX_FD    1024
+#define SO_SMKEX_NOCRYPT 0xA001
+
+#define DEBUG 1
+
+FILE *dbfile;
+#define dbgtext(x)\
+  fprintf(dbfile, (x));
+
+
 
 int select_subflow(int oldflags, int index) {
     int newflags = oldflags;
@@ -48,6 +59,11 @@ struct mp_socket_s {
         unsigned char* remote_pub_key;
         unsigned int remote_pub_key_length;
     } session;
+
+    int connected; // for client socket
+    int accepted;  // for server socket
+    int req_noblock; // signal fcntl(...,O_NONBLOCK) request
+    int no_crypt; // to signal that we want a standard TCP connection (no encryption)
 } mp_sockets[SMKEX_MAX_FD];
 
 int initialized = 0;
@@ -357,18 +373,24 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key) {
     return remote_pub_key;
 }
 
-
 int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     int (*original_connect)(int, const struct sockaddr*, socklen_t) = dlsym(RTLD_NEXT, "connect");
+    int (*original_fcntl)(int, int, int) = dlsym(RTLD_NEXT, "fcntl");
     __initialize();
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
-        printf("Error: unsupported socket fd = %d.\n", sockfd);
+        fprintf(stderr, "Error: unsupported socket fd = %d.\n", sockfd);
         errno = EBADF;
         return -1;
     }
 
+#if DEBUG
+    fprintf(stderr, "libsmkex: starting connect\n");
+#endif
+
     int rc = original_connect(sockfd, address, address_len);
+    EC_KEY* ec_key = NULL;
+    
     if (rc >= 0) {
         mp_sockets[sockfd].used = 1;
         mp_sockets[sockfd].recv_buffer = NULL;
@@ -378,8 +400,16 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
     }
 
+    if (mp_sockets[sockfd].no_crypt)
+    {
+#if DEBUG
+    fprintf(stderr, "libsmkex: connecting without crypto\n");
+#endif
+      goto connect_no_crypt;
+    }
+
     // Run ECDH key exchange
-    EC_KEY* ec_key = __new_key_pair();
+    ec_key = __new_key_pair();
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not generate local key pair.\n");
         return -1;
@@ -390,6 +420,8 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         fprintf(stderr, "Error: Could not send local public key.\n");
         return -1;
     }
+
+    fprintf(stderr, "We are here 3\n");
 
     EC_POINT* remote_pub_key = __recv_remote_key(sockfd, ec_key);
     if (remote_pub_key == NULL) {
@@ -464,12 +496,27 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         }
     }
 
+connect_no_crypt:
+    mp_sockets[sockfd].connected = 1;
+    if (mp_sockets[sockfd].req_noblock)
+    {
+			int flags;
+			if (-1 == (flags = original_fcntl(sockfd, F_GETFL, 0))) {
+        flags = 0;
+			}
+    	return original_fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);     
+    }
+
+#if DEBUG
+    fprintf(stderr, "libsmkex: finishing connect\n");
+#endif
+
     return rc;
 }
 
-
 int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     int (*original_accept)(int, struct sockaddr*, socklen_t*) = dlsym(RTLD_NEXT, "accept");
+    int (*original_fcntl)(int, int, int) = dlsym(RTLD_NEXT, "fcntl");
     __initialize();
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
@@ -478,7 +525,12 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         return -1;
     }
 
+#if DEBUG
+    fprintf(stderr, "libsmkex: starting accept\n");
+#endif
+
     int accepted_fd = original_accept(sockfd, addr, addrlen);
+    
     if (accepted_fd >= 0) {
         mp_sockets[accepted_fd].used = 1;
         mp_sockets[accepted_fd].recv_buffer = NULL;
@@ -488,6 +540,18 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
     }
 
+
+    if (mp_sockets[sockfd].no_crypt)
+    {
+#if DEBUG
+      fprintf(stderr, "libsmkex: accepting without crypto\n");
+#endif
+      goto accept_no_crypt;
+    }
+#if DEBUG
+    fprintf(stderr, "libsmkex: accepting with crypto\n");
+#endif
+
     // Perform DH key exchange
     EC_KEY* ec_key = __new_key_pair();
     if (ec_key == NULL) {
@@ -495,11 +559,13 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         return -1;
     }
 
+
     int rc = __send_local_key(accepted_fd, ec_key);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send local public key.\n");
         return -1;
     }
+
 
     EC_POINT* remote_pub_key = __recv_remote_key(accepted_fd, ec_key);
     if (remote_pub_key == NULL) {
@@ -558,12 +624,30 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         return -1;
     }
 
+accept_no_crypt:
+    mp_sockets[sockfd].accepted = 1;
+    if (mp_sockets[sockfd].req_noblock)
+    {
+			int flags;
+			if (-1 == (flags = original_fcntl(sockfd, F_GETFL, 0))) {
+        flags = 0;
+			}
+    	return original_fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);     
+    }
+
+#if DEBUG
+    fprintf(stderr, "libsmkex: finishing accept\n");
+#endif
+
     return accepted_fd;
 }
 
 
 ssize_t send(int sockfd, const void* buf, size_t len, int flags) {
     ssize_t (*original_send)(int, const void*, size_t, int) = dlsym(RTLD_NEXT, "send");
+#if DEBUG
+    fprintf(stderr, "libsmkex: starting send\n");
+#endif
     __initialize();
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
@@ -572,6 +656,17 @@ ssize_t send(int sockfd, const void* buf, size_t len, int flags) {
         return -1;
     }
 
+    if(mp_sockets[sockfd].no_crypt)
+    {
+#if DEBUG
+      fprintf(stderr, "libsmkex: sending without crypto\n");
+#endif
+      return original_send(sockfd, buf, len, flags);
+    }
+
+#if DEBUG
+    fprintf(stderr, "libsmkex: sending with crypto\n");
+#endif
     // Encrypt
     uint32_t max_ciphertext_length = len + EVP_MAX_IV_LENGTH + EVP_MAX_BLOCK_LENGTH +
                                         SESSION_TAG_LENGTH;
@@ -592,6 +687,9 @@ ssize_t send(int sockfd, const void* buf, size_t len, int flags) {
 
 ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
     ssize_t (*original_recv)(int, void*, size_t, int) = dlsym(RTLD_NEXT, "recv");
+#if DEBUG
+    fprintf(stderr, "libsmkex: starting recv\n");
+#endif    
     __initialize();
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
@@ -600,6 +698,16 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
         return -1;
     }
 
+    if(mp_sockets[sockfd].no_crypt)
+    {
+#if DEBUG
+      fprintf(stderr, "libsmkex: receiving without crypto\n");
+#endif
+      return original_recv(sockfd, buf, len, flags);
+    }
+#if DEBUG    
+    fprintf(stderr, "libsmkex: receiving with crypto\n");
+#endif
 
     if (mp_sockets[sockfd].recv_remaining == 0) {
         // App requested bytes, but we have none available
@@ -672,4 +780,72 @@ int close(int fd) {
         mp_sockets[fd].used = 0;
     }
     return rc;
+}
+
+
+int fcntl(int sockfd, int cmd, ...) {
+    int (*original_fcntl)(int, int, ...) = dlsym(RTLD_NEXT, "fcntl");
+    int rc;
+    va_list ap;
+    int flags;
+
+    __initialize();
+
+    if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
+        fprintf(stderr, "Error: unsupported socket fd = %d.\n", sockfd);
+        errno = EBADF;
+        return -1;
+    }
+
+    va_start(ap, cmd);
+    flags = va_arg(ap, int);
+    va_end(ap);
+    if (-1 == (flags = original_fcntl(sockfd, F_GETFL, 0))) {
+      flags = 0;
+    }
+    int req_noblock = flags & O_NONBLOCK;
+    // Check if we have connected or accepted already. If not,
+    // then skip the NONBLOCK request but flag it for later.
+    // Otherwise, just forward the fcntl request.
+    if (mp_sockets[sockfd].connected == 0 && mp_sockets[sockfd].accepted == 0
+        && req_noblock == 1)
+    {
+      mp_sockets[sockfd].req_noblock = 1;
+      flags = flags ^ O_NONBLOCK;
+      rc = original_fcntl(sockfd, cmd, flags);
+    }
+    else
+    {
+      rc = original_fcntl(sockfd, cmd, flags);
+    }
+
+    return rc;
+}
+
+int setsockopt(int sockfd, int level, int option_name, const void *option_value, socklen_t option_len)
+{
+    int (*original_setsockopt)(int, int, int, const void*, socklen_t) = dlsym(RTLD_NEXT, "setsockopt");
+
+    __initialize();
+
+    if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
+        fprintf(stderr, "Error: unsupported socket fd = %d.\n", sockfd);
+        errno = EBADF;
+        return -1;
+    }
+
+    // Check if we are being required to stop crypto and did not connect/accept yet.
+    // Otherwise, just forward the setsockopt request.
+    // Do not interrupt crypto if we already started encryption.
+    if (mp_sockets[sockfd].connected == 0 && mp_sockets[sockfd].accepted == 0
+        && option_name == SO_SMKEX_NOCRYPT)
+    {
+      mp_sockets[sockfd].no_crypt = 1;
+      return 0;
+    }
+    else
+    {
+      return original_setsockopt(sockfd, level, option_name, option_value, option_len);
+    }
+
 }
