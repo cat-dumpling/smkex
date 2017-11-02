@@ -160,6 +160,7 @@ int __send_local_key(int sockfd, EC_KEY* key, int ids) {
 #endif
     // Public keys are always sent on the master subflow
     rc = smkex_pkt_send(ppkt, sockfd, select_subflow(0, ids));
+    smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send our public key.\n");
         return -1;
@@ -186,6 +187,7 @@ int __send_dummy(int sockfd) {
 
     // Send on any flow
     int rc = smkex_pkt_send(ppkt, sockfd, 0);
+    smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send dummy packet.\n");
         return -1;
@@ -244,6 +246,7 @@ int __send_session_info(int sockfd, int ids) {
             mp_sockets[sockfd].iv, ppkt->value, &ppkt->length);
     if (rc < 0) {
         fprintf(stderr, "Error: aesgcm encryption failed.\n");
+        smkex_pkt_free(ppkt);
         return -1;
     }
 
@@ -265,6 +268,7 @@ int __send_session_info(int sockfd, int ids) {
 #endif
     // Send session info on secondary channel
     rc = smkex_pkt_send(ppkt, sockfd, select_subflow(0, ids));
+    smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session ciphertext.\n");
         return -1;
@@ -280,6 +284,7 @@ int __send_session_info(int sockfd, int ids) {
  */
 int __recv_check_session_info(int sockfd, int ids) {
     ssize_t (*original_recv)(int, void*, size_t, int) = dlsym(RTLD_NEXT, "recv");
+    int retval = 0;
 
     smkex_pkt* ppkt = smkex_pkt_allocate(0);
     if (ppkt == NULL) {
@@ -296,21 +301,24 @@ int __recv_check_session_info(int sockfd, int ids) {
     //int rc = smkex_pkt_recv(ppkt, sockfd, select_subflow(0, ids)); // This should be used when kernel code is fine
     if (rc <= 0) {
         fprintf(stderr, "Error: could not receive session info packet.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
 
     // Decrypt info
     unsigned char* session_info = malloc(ppkt->length);
     if (session_info == NULL) {
         fprintf(stderr, "Error: could not allocate memory for session info decryption.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
     size_t session_info_length;
     rc = mp_aesgcm_decrypt(ppkt->value, ppkt->length, mp_sockets[sockfd].session_key,
             mp_sockets[sockfd].iv, session_info, &session_info_length);
     if (rc < 0) {
         fprintf(stderr, "Error: session info decryption failed.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
 
     printf("Session info:");
@@ -322,7 +330,8 @@ int __recv_check_session_info(int sockfd, int ids) {
     rc = memcmp(cursor, mp_sockets[sockfd].session.remote_nonce, SESSION_NONCE_LENGTH);
     if (rc != 0) {
         fprintf(stderr, "Remote nonce mismsatch.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
     cursor += SESSION_NONCE_LENGTH;
 
@@ -330,14 +339,16 @@ int __recv_check_session_info(int sockfd, int ids) {
             mp_sockets[sockfd].session.remote_pub_key_length);
     if (rc != 0) {
         fprintf(stderr, "Remote pub key mismsatch.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
     cursor += mp_sockets[sockfd].session.remote_pub_key_length;
 
     rc = memcmp(cursor, mp_sockets[sockfd].session.local_nonce, SESSION_NONCE_LENGTH);
     if (rc != 0) {
         fprintf(stderr, "Local nonce mismsatch.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
     cursor += SESSION_NONCE_LENGTH;
 
@@ -345,10 +356,13 @@ int __recv_check_session_info(int sockfd, int ids) {
             mp_sockets[sockfd].session.local_pub_key_length);
     if (rc != 0) {
         fprintf(stderr, "Local pub key mismsatch.\n");
-        return -1;
+        retval = -1;
+        goto free_ppkt_recv_check_si;
     }
 
-    return 0;
+free_ppkt_recv_check_si:
+    smkex_pkt_free(ppkt);
+    return retval;
 }
 
 
@@ -372,22 +386,22 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     //int rc = smkex_pkt_recv(ppkt, sockfd, select_subflow(0, ids)); This should be used once kernel code is fixed
     if (rc <= 0) {
         fprintf(stderr, "Error: Could not get remote public key.\n");
-        return NULL;
+        goto err_recv_remotekey;
     }
 
     // Allocate new point for remote public key
     const EC_GROUP* ec_group = EC_KEY_get0_group(key);
     EC_POINT* remote_pub_key = EC_POINT_new(ec_group);
     if (remote_pub_key == NULL) {
-       fprintf(stderr, "Error: Could not create point for remote public key.\n");
-       return NULL;
+        fprintf(stderr, "Error: Could not create point for remote public key.\n");
+        goto err_recv_remotekey;
     }
 
     // Get remote nonce
     mp_sockets[sockfd].session.remote_nonce = malloc(SESSION_NONCE_LENGTH);
     if (mp_sockets[sockfd].session.remote_nonce == NULL) {
         fprintf(stderr, "Error: could not allocate memory for remote nonce.\n");
-        return NULL;
+        goto err_recv_remotekey2;
     }
 
     memcpy(mp_sockets[sockfd].session.remote_nonce, ppkt->value, SESSION_NONCE_LENGTH);
@@ -398,7 +412,7 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     mp_sockets[sockfd].session.remote_pub_key_length = remote_pub_key_length;
     if (mp_sockets[sockfd].session.remote_pub_key == NULL) {
         fprintf(stderr, "Error: could not allocate memory for remote public key.\n");
-        return NULL;
+        goto err_recv_remotekey3;
     }
     memcpy(mp_sockets[sockfd].session.remote_pub_key, ppkt->value + SESSION_NONCE_LENGTH,
             remote_pub_key_length);
@@ -407,10 +421,27 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
                 remote_pub_key_length, NULL);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not convert remote public key to point.\n");
-        return NULL;
+        goto err_recv_remotekey4;
     }
 
+    smkex_pkt_free(ppkt);
     return remote_pub_key;
+
+err_recv_remotekey4:
+    free(mp_sockets[sockfd].session.remote_pub_key);
+    mp_sockets[sockfd].session.remote_pub_key = NULL;
+
+err_recv_remotekey3:
+    free(mp_sockets[sockfd].session.remote_nonce);
+    mp_sockets[sockfd].session.remote_nonce = NULL;
+
+err_recv_remotekey2:
+    EC_POINT_free(remote_pub_key);
+
+err_recv_remotekey:
+    smkex_pkt_free(ppkt);
+
+    return NULL;
 }
 
 int __recv_dummy(int sockfd) {
@@ -928,7 +959,6 @@ ssize_t send(int sockfd, const void* buf, size_t len, int flags) {
 ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
     ssize_t (*original_recv)(int, void*, size_t, int) = dlsym(RTLD_NEXT, "recv");
     __initialize();
-
     int rc;
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
@@ -959,11 +989,15 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
         ppkt->recv = original_recv;
         rc = smkex_pkt_recv(ppkt, sockfd, flags);
         if (rc <= 0)
-          return rc; // Could be a non-blocking socket
+        {
+            smkex_pkt_free(ppkt);
+            return rc; // Could be a non-blocking socket
+        }
 
         if (ppkt->type != TLV_TYPE_DATA) {
             // Bad type means we cannot accept this TLV
             fprintf(stderr, "Error: received type = %d, was expecting %d.\n", ppkt->type, TLV_TYPE_DATA);
+            smkex_pkt_free(ppkt);
             return -1;
         }
 
@@ -971,6 +1005,7 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
         mp_sockets[sockfd].recv_buffer = malloc(ppkt->length); // Will be smaller
         if (mp_sockets[sockfd].recv_buffer == NULL) {
             perror("malloc");
+            smkex_pkt_free(ppkt);
             return -1;
         }
 
@@ -1004,6 +1039,7 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
             return len;
         }
     }
+
 }
 
 
