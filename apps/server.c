@@ -18,6 +18,8 @@
 
 #define BUFFER_SIZE  4096
 
+#define DEBUG 0
+
 
 int my_send(int sockfd, char * buffer, int length) {
     int bytes_sent = 0;
@@ -105,6 +107,10 @@ int main(int argc, char* argv[]) {
             /* Done reading from file */
             if (bytes_read == 0)
                 break;
+
+#if DEBUG
+            printf("[dbg][server] read %d bytes from file, sending to client...\n", bytes_read);
+#endif
 
             my_send(connect_fd, buf, bytes_read);
         }
