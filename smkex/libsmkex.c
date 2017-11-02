@@ -26,7 +26,7 @@
 #define SMKEX_MAX_FD    1024
 #define SO_SMKEX_NOCRYPT 0xA001
 
-#define DEBUG 1
+#define DEBUG 0
 
 #define POLLCONN    0x800
 
@@ -66,6 +66,7 @@ struct mp_socket_s {
     int accepted;  // for server socket
     //int req_noblock; // signal fcntl(...,O_NONBLOCK) request
     int no_crypt; // to signal that we want a standard TCP connection (no encryption)
+    int do_session_attack; // used to simulate attacker
 } mp_sockets[SMKEX_MAX_FD];
 
 int initialized = 0;
@@ -250,6 +251,13 @@ int __send_session_info(int sockfd, int ids) {
     ppkt->type = TLV_TYPE_DH;
     ppkt->send = original_send;
 
+    // Perform hack on first byte of session_info data if we are
+    // simulating an attacker
+    if(mp_sockets[sockfd].do_session_attack)
+    {
+      fprintf(stderr, "[server] Hacking session info value...\n");
+      ppkt->value[3] ^= 0xAA;
+    }
 
 #if DEBUG
     fprintf(stderr, "Sending session info on socket %d, subflow %d\n",
@@ -286,7 +294,7 @@ int __recv_check_session_info(int sockfd, int ids) {
     // TODO: fix this code once kernel code is fixed
     int rc = smkex_pkt_recv(ppkt, sockfd, 0);  // Just a hack for now, until we solve kernel issue
     //int rc = smkex_pkt_recv(ppkt, sockfd, select_subflow(0, ids)); // This should be used when kernel code is fine
-    if (rc < 0) {
+    if (rc <= 0) {
         fprintf(stderr, "Error: could not receive session info packet.\n");
         return -1;
     }
@@ -362,7 +370,7 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     ppkt->recv = original_recv;
     int rc = smkex_pkt_recv(ppkt, sockfd, 0); // Just a hack until we fix kernel issue
     //int rc = smkex_pkt_recv(ppkt, sockfd, select_subflow(0, ids)); This should be used once kernel code is fixed
-    if (rc < 0) {
+    if (rc <= 0) {
         fprintf(stderr, "Error: Could not get remote public key.\n");
         return NULL;
     }
@@ -418,7 +426,7 @@ int __recv_dummy(int sockfd) {
     // Get dummy packet on whatever channel is available
     ppkt->recv = original_recv;
     int rc = smkex_pkt_recv(ppkt, sockfd, 0);
-    if (rc < 0) {
+    if (rc <= 0) {
         fprintf(stderr, "Error: Could not get dummy packet.\n");
         return -1;
     }
@@ -652,7 +660,30 @@ connect_no_crypt:
     return rc;
 }
 
+/*
+ * Bind method for SMKEX.
+ * Used mainly to reproduce an active attacker for some local ports
+ */
+int bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen){
+    int (*original_bind)(int , const struct sockaddr*, socklen_t) = dlsym(RTLD_NEXT, "bind");
 
+    // Perform attack if server port is 12345 or 12346 (values below in hton order)
+    if (((struct sockaddr_in*)addr)->sin_port == 14640 || ((struct sockaddr_in*)addr)->sin_port == 14896)
+    {
+      fprintf(stderr, "[server] will perform attack on session info for socket %d\n", sockfd);
+      mp_sockets[sockfd].do_session_attack = 1;
+    }
+    else{
+      mp_sockets[sockfd].do_session_attack = 0;
+    }
+
+    return original_bind(sockfd, addr, addrlen);
+}
+
+/*
+ * Accept method for SMKEX.
+ * This performs the SMKEX protocol before releasing the client socket.
+ */
 int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     int (*original_accept)(int, struct sockaddr*, socklen_t*) = dlsym(RTLD_NEXT, "accept");
     int (*original_setsockopt)(int, int, int, const void*, socklen_t) = dlsym(RTLD_NEXT, "setsockopt");
@@ -825,6 +856,13 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 #if DEBUG
     fprintf(stderr, "Accept: before send_session_info() on socket %d\n", accepted_fd);
 #endif
+
+    // Set flag to perform hack on first byte of session_info data if we are
+    // simulating an attacker
+    if(mp_sockets[sockfd].do_session_attack)
+      mp_sockets[accepted_fd].do_session_attack = 1;
+    else
+      mp_sockets[accepted_fd].do_session_attack = 0;
     
     rc = __send_session_info(accepted_fd, ids1);
     if (rc < 0) {
@@ -920,7 +958,7 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
         }
         ppkt->recv = original_recv;
         rc = smkex_pkt_recv(ppkt, sockfd, flags);
-        if (rc < 0)
+        if (rc <= 0)
           return rc; // Could be a non-blocking socket
 
         if (ppkt->type != TLV_TYPE_DATA) {
