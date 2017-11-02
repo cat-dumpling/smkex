@@ -1026,6 +1026,9 @@ ssize_t recv(int sockfd, void* buf, size_t len, int flags) {
 
             // Sent all bytes in the current decryption, free stored resources
             smkex_pkt_free(mp_sockets[sockfd].recv_stored_ppkt);
+	    free(mp_sockets[sockfd].recv_buffer);
+            mp_sockets[sockfd].recv_buffer = NULL;
+            mp_sockets[sockfd].recv_buffer_cursor = NULL;
 
             ssize_t received = mp_sockets[sockfd].recv_remaining;
             mp_sockets[sockfd].recv_remaining = 0;
