@@ -27,6 +27,7 @@
 #define SO_SMKEX_NOCRYPT 0xA001
 
 #define DEBUG 0
+#define VERBOSE 0
 
 #define POLLCONN    0x800
 
@@ -78,9 +79,51 @@ void __initialize(void) {
     }
 }
 
+/*
+ * Clean up memory used by some fields in mp_socket_s for a given sockfd
+ */
+void free_session(int sockfd)
+{
+    if(mp_sockets[sockfd].session.local_nonce != NULL)
+    {
+      free(mp_sockets[sockfd].session.local_nonce);
+      mp_sockets[sockfd].session.local_nonce = NULL;
+    }
+    if(mp_sockets[sockfd].session.remote_nonce != NULL)
+    {
+      free(mp_sockets[sockfd].session.remote_nonce);
+      mp_sockets[sockfd].session.remote_nonce = NULL;
+    }
+    if(mp_sockets[sockfd].session.local_pub_key != NULL)
+    {
+      free(mp_sockets[sockfd].session.local_pub_key);
+      mp_sockets[sockfd].session.local_pub_key = NULL;
+    }
+    if(mp_sockets[sockfd].session.remote_pub_key != NULL)
+    {
+      free(mp_sockets[sockfd].session.remote_pub_key);
+      mp_sockets[sockfd].session.remote_pub_key = NULL;
+    }
+
+    if(mp_sockets[sockfd].session_key != NULL)
+    {
+      free(mp_sockets[sockfd].session_key);
+      mp_sockets[sockfd].session_key = NULL;
+    }
+    if(mp_sockets[sockfd].iv != NULL)
+    {
+      free(mp_sockets[sockfd].iv);
+      mp_sockets[sockfd].iv = NULL;
+    }
+
+    mp_sockets[sockfd].used = 0;
+}
+
+
 
 EC_KEY* __new_key_pair(void) {
     // Initialize new curve
+    // TODO: FIXLEAK: something leaks here (or in calling method)
     EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not create EC key.\n");
@@ -91,6 +134,7 @@ EC_KEY* __new_key_pair(void) {
     int rc = EC_KEY_generate_key(ec_key);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not generate ECDH key.\n");
+        EC_KEY_free(ec_key);
         return NULL;
     }
 
@@ -124,11 +168,11 @@ int __send_local_key(int sockfd, EC_KEY* key, int ids) {
     mp_sockets[sockfd].session.local_nonce = malloc(SESSION_NONCE_LENGTH);
     if (mp_sockets[sockfd].session.local_nonce == NULL) {
         fprintf(stderr, "Error: could not allocate memory for nonce.\n");
-        return -1;
+        goto err_send_local;
     }
     if (!RAND_bytes(mp_sockets[sockfd].session.local_nonce, SESSION_NONCE_LENGTH)) {
         fprintf(stderr, "Error: could not generate nonce.\n");
-        return -1;
+        goto err_send_local2;
     }
 
     // Convert to bytes
@@ -136,14 +180,14 @@ int __send_local_key(int sockfd, EC_KEY* key, int ids) {
             mp_sockets[sockfd].session.local_pub_key, pub_key_size, NULL);
     if (rc == 0) {
          fprintf(stderr, "Error: Could not convert ECDH exchange to bytestring.\n");
-         return -1;
+        goto err_send_local2;
     }
 
     // Prepare message
     smkex_pkt* ppkt = smkex_pkt_allocate(SESSION_NONCE_LENGTH + pub_key_size);
     if (ppkt == NULL) {
         fprintf(stderr, "Error: could not allocate memory for server pkt.\n");
-        return -1;
+        goto err_send_local2;
     }
 
     memcpy(ppkt->value, mp_sockets[sockfd].session.local_nonce, SESSION_NONCE_LENGTH);
@@ -163,10 +207,20 @@ int __send_local_key(int sockfd, EC_KEY* key, int ids) {
     smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send our public key.\n");
-        return -1;
+        goto err_send_local2;
     }
 
     return 0;
+
+err_send_local2:
+    free(mp_sockets[sockfd].session.local_nonce);
+    mp_sockets[sockfd].session.local_nonce = NULL;
+
+err_send_local:
+    free(mp_sockets[sockfd].session.local_pub_key);
+    mp_sockets[sockfd].session.local_pub_key = NULL;
+
+    return -1;
 }
 
 int __send_dummy(int sockfd) {
@@ -230,15 +284,17 @@ int __send_session_info(int sockfd, int ids) {
     memcpy(cursor, mp_sockets[sockfd].session.remote_pub_key,
             mp_sockets[sockfd].session.remote_pub_key_length);
 
+#if DEBUG
     printf("Session info:");
     hexdump(session, session_length);
     printf("\n");
+#endif
 
     // Allocate space for AEAD encryption of session info; using CTR so only need extra tag space
     smkex_pkt* ppkt = smkex_pkt_allocate(session_length + SESSION_TAG_LENGTH);
     if (ppkt == NULL) {
         fprintf(stderr, "Error: could not allocate memory for session ciphertext.\n");
-        return -1;
+        goto err_sess_info;
     }
 
     // Encrypt using session key (TODO: unsafe, update IV after each encryption)
@@ -247,7 +303,7 @@ int __send_session_info(int sockfd, int ids) {
     if (rc < 0) {
         fprintf(stderr, "Error: aesgcm encryption failed.\n");
         smkex_pkt_free(ppkt);
-        return -1;
+        goto err_sess_info;
     }
 
     // Send network packet containing session info
@@ -271,10 +327,15 @@ int __send_session_info(int sockfd, int ids) {
     smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session ciphertext.\n");
-        return -1;
+        goto err_sess_info;
     }
 
+    free(session);
     return 0;
+
+err_sess_info:
+    free(session);
+    return -1;
 }
 
 
@@ -321,9 +382,11 @@ int __recv_check_session_info(int sockfd, int ids) {
         goto free_ppkt_recv_check_si;
     }
 
+#if DEBUG
     printf("Session info:");
     hexdump(session_info, session_info_length);
     printf("\n");
+#endif
 
     // Compare values
     unsigned char* cursor = session_info;
@@ -391,6 +454,7 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
 
     // Allocate new point for remote public key
     const EC_GROUP* ec_group = EC_KEY_get0_group(key);
+    // TODO: FIXLEAK: something leaks in the line below
     EC_POINT* remote_pub_key = EC_POINT_new(ec_group);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not create point for remote public key.\n");
@@ -437,6 +501,7 @@ err_recv_remotekey3:
 
 err_recv_remotekey2:
     EC_POINT_free(remote_pub_key);
+    remote_pub_key = NULL;
 
 err_recv_remotekey:
     smkex_pkt_free(ppkt);
@@ -578,50 +643,53 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     EC_KEY* ec_key = __new_key_pair();
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not generate local key pair.\n");
-        return -1;
+        goto err_connect;
     }
 
     // Public keys sent on the master subflow
     rc = __send_local_key(sockfd, ec_key, ids0);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send local public key.\n");
-        return -1;
+        goto err_connect2;
     }
 
     // Public keys received on the master subflow
     EC_POINT* remote_pub_key = __recv_remote_key(sockfd, ec_key, ids0);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not receive remote public key. \n");
-        return -1;
+        goto err_connect2;
     }
 
     // Compute session key
     mp_sockets[sockfd].session_key = malloc(SESSION_KEY_LENGTH);
     if (mp_sockets[sockfd].session_key == NULL) {
         perror("malloc");
-        return -1;
+        goto err_connect3;
     }
     rc = ECDH_compute_key(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
-        return -1;
+        goto err_connect4;
     }
 
     // TODO DEBUG
+#if DEBUG
     printf("Key = ");
     hexdump(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH);
     printf("\n");
+#endif
     memset(mp_sockets[sockfd].session_key, 0, SESSION_KEY_LENGTH);
 
     mp_sockets[sockfd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[sockfd].iv == NULL) {
         perror("malloc");
-        return -1;
+        goto err_connect4;
     }
     memset(mp_sockets[sockfd].iv, 0, SESSION_IV_LENGTH);
 
     // TODO DEBUG
+#if DEBUG
     printf("Session local nonce = ");
     hexdump(mp_sockets[sockfd].session.local_nonce, SESSION_NONCE_LENGTH);
     printf("\n");
@@ -637,6 +705,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     hexdump(mp_sockets[sockfd].session.remote_pub_key,
             mp_sockets[sockfd].session.remote_pub_key_length);
     printf("\n");
+#endif
 
     // First check number of existing subflows (needed next)
     cnt_subflows=0;
@@ -646,7 +715,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     {
         fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
         perror("getsockopt");
-        return -1;
+        goto err_connect5;
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
@@ -657,13 +726,18 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     //struct mptcp_sub_ids *ids;
     //socklen_t ids_len;
     ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+1);
+    free(ids); ids=NULL;
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
+    if(ids == NULL)
+    {
+        goto err_connect5;
+    }
     rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     if(rc < 0)
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
         perror("getsockopt");
-        return -1;
+        goto err_connect5;
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
@@ -674,7 +748,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     rc = __recv_check_session_info(sockfd, ids1);
     if (rc < 0) {
         fprintf(stderr, "Error: session info check failed.\n");
-        return -1;
+        goto err_connect5;
     }
 
 #if DEBUG
@@ -688,7 +762,30 @@ connect_no_crypt:
     fprintf(stderr, "libsmkex: finishing connect on socket %d\n", sockfd);
 #endif
 
+    free(ids); ids=NULL;
+    //EC_POINT_free(remote_pub_key); remote_pub_key = NULL;
+    //EC_KEY_free(ec_key); ec_key = NULL;
     return rc;
+
+err_connect5:
+    free(mp_sockets[sockfd].iv);
+    mp_sockets[sockfd].iv = NULL;
+
+err_connect4:
+    free(mp_sockets[sockfd].session_key);
+    mp_sockets[sockfd].session_key = NULL;
+
+err_connect3:
+    EC_POINT_free(remote_pub_key);
+
+err_connect2:
+    EC_KEY_free(ec_key);
+
+err_connect:
+    free(ids);
+
+    free_session(sockfd);
+    return -1;
 }
 
 /*
@@ -731,6 +828,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     fprintf(stderr, "libsmkex: starting accept on socket %d\n", sockfd);
 #endif
 
+    *addrlen = 0;
     int accepted_fd = original_accept(sockfd, addr, addrlen);
     if (accepted_fd >= 0) {
         mp_sockets[accepted_fd].used = 1;
@@ -755,6 +853,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     int rc = __recv_dummy(accepted_fd);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not receive dummy packet.\n");
+        mp_sockets[accepted_fd].used = 0;
         return -1;
     }
 
@@ -764,6 +863,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         &slave_count, sizeof(int));
     if (rc < 0) {
         fprintf(stderr, "Error: could not set slave threshold.\n");
+        mp_sockets[accepted_fd].used = 0;
         return -1;
     }
 
@@ -791,6 +891,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     {
         fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
         perror("getsockopt");
+        mp_sockets[accepted_fd].used = 1;
         return -1;
     }
 #if DEBUG
@@ -810,7 +911,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
         perror("getsockopt");
-        return -1;
+        goto err_accept;
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
@@ -821,14 +922,14 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     EC_KEY* ec_key = __new_key_pair();
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not generate local key pair.\n");
-        return -1;
+        goto err_accept;
     }
 
     // Public keys sent on the master subflow
     rc = __send_local_key(accepted_fd, ec_key, ids0);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send local public key.\n");
-        return -1;
+        goto err_accept2;
     }
 
 
@@ -836,37 +937,39 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     EC_POINT* remote_pub_key = __recv_remote_key(accepted_fd, ec_key, ids0);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not receive remote public key. \n");
-        return -1;
+        goto err_accept2;
     }
 
+    // TODO FIXLEAK: malloc is allocating less memory than needed
     // Compute session key
-    mp_sockets[accepted_fd].session_key = malloc(SESSION_KEY_LENGTH);
+    mp_sockets[accepted_fd].session_key = malloc(2*SESSION_KEY_LENGTH);
     if (mp_sockets[accepted_fd].session_key == NULL) {
         perror("malloc");
-        return -1;
+        goto err_accept3;
     }
     rc = ECDH_compute_key(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
-        return -1;
+        goto err_accept4;
     }
 
-    // TODO DEBUG
+#if DEBUG
     printf("Key = ");
     hexdump(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH);
     printf("\n");
+#endif
     memset(mp_sockets[accepted_fd].session_key, 0, SESSION_KEY_LENGTH);
 
 
     mp_sockets[accepted_fd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[accepted_fd].iv == NULL) {
         perror("malloc");
-        return -1;
+        goto err_accept4;
     }
     memset(mp_sockets[accepted_fd].iv, 0, SESSION_IV_LENGTH);
 
-    // TODO DEBUG
+#if DEBUG
     printf("Session local nonce = ");
     hexdump(mp_sockets[accepted_fd].session.local_nonce, SESSION_NONCE_LENGTH);
     printf("\n");
@@ -883,8 +986,6 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
             mp_sockets[accepted_fd].session.remote_pub_key_length);
     printf("\n");
 
-
-#if DEBUG
     fprintf(stderr, "Accept: before send_session_info() on socket %d\n", accepted_fd);
 #endif
 
@@ -898,7 +999,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     rc = __send_session_info(accepted_fd, ids1);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session info.\n");
-        return -1;
+        goto err_accept5;
     }
 
 #if DEBUG
@@ -912,7 +1013,30 @@ accept_no_crypt:
     fprintf(stderr, "libsmkex: finishing accept on socket %d\n", sockfd);
 #endif
 
+    free(ids);
+    //EC_POINT_free(remote_pub_key);
+    //EC_KEY_free(ec_key);
     return accepted_fd;
+
+err_accept5:
+    free(mp_sockets[accepted_fd].iv);
+    mp_sockets[accepted_fd].iv = NULL;
+
+err_accept4:
+    free(mp_sockets[accepted_fd].session_key);
+    mp_sockets[accepted_fd].session_key = NULL;
+
+err_accept3:
+    EC_POINT_free(remote_pub_key);
+
+err_accept2:
+    EC_KEY_free(ec_key);
+
+err_accept:
+    free(ids);
+
+    free_session(accepted_fd);
+    return -1;
 }
 
 
@@ -1130,3 +1254,7 @@ int setsockopt(int sockfd, int level, int option_name, const void *option_value,
     }
 
 }
+
+
+
+

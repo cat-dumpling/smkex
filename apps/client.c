@@ -68,7 +68,9 @@ int main(int argc, char* argv[]) {
 
     // Connect
     ret = connect(client_sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    CHECK(ret >= 0, "connect");
+    //CHECK(ret >= 0, "connect");
+    if(ret < 0)
+      return -1;
     printf("[client] Connected to %d\n", server_port);
 
     // Recv file size
