@@ -26,8 +26,8 @@
 #define SMKEX_MAX_FD    1024
 #define SO_SMKEX_NOCRYPT 0xA001
 
-#define DEBUG 0
-#define VERBOSE 0
+#define DEBUG 1
+#define VERBOSE 1
 
 #define POLLCONN    0x800
 
@@ -623,7 +623,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     // Find IDs of subflows
     struct mptcp_sub_ids *ids;
     socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+1);
+    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
     rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     ids0 = ids->sub_status[0].id;
@@ -725,7 +725,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     // Find IDs of subflows
     //struct mptcp_sub_ids *ids;
     //socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+1);
+    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
     free(ids); ids=NULL;
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
     if(ids == NULL)
@@ -902,7 +902,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     // Find IDs of subflows
     struct mptcp_sub_ids *ids;
     socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+1);
+    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
     rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     ids0 = ids->sub_status[0].id;
