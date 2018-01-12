@@ -26,7 +26,7 @@
 #define SMKEX_MAX_FD    1024
 #define SO_SMKEX_NOCRYPT 0xA001
 
-#define DEBUG 0
+#define DEBUG 1
 #define VERBOSE 0
 
 #define POLLCONN    0x800
@@ -772,18 +772,26 @@ err_connect5:
     mp_sockets[sockfd].iv = NULL;
 
 err_connect4:
-    free(mp_sockets[sockfd].session_key);
-    mp_sockets[sockfd].session_key = NULL;
+    fprintf(stderr, "Here4\n");
+    if(mp_sockets[sockfd].session_key != NULL)
+    {
+      free(mp_sockets[sockfd].session_key);
+      mp_sockets[sockfd].session_key = NULL;
+    }
 
 err_connect3:
+    fprintf(stderr, "Here3\n");
     EC_POINT_free(remote_pub_key);
 
 err_connect2:
+    fprintf(stderr, "Here2\n");
     EC_KEY_free(ec_key);
 
 err_connect:
+    fprintf(stderr, "Here1\n");
     free(ids);
 
+    fprintf(stderr, "Here0\n");
     free_session(sockfd);
     return -1;
 }

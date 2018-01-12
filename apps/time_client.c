@@ -15,7 +15,7 @@
 #include <time.h>
 
 #define BUFFER_SIZE 4096
-#define NEXP 10
+#define NEXP 1
 
 #define SERVER_PORT     1337
 #define SERVER_IP       "127.0.0.1"
@@ -101,6 +101,8 @@ int main(int argc, char* argv[]) {
     int ret, k;
     double conntime, ttime = 0;
     double times[NEXP];
+    double totaltimes[NEXP];
+    clock_t tstart, tend;
 
     int opt;
     while ((opt = getopt(argc, argv, "i:p:f:")) != -1) {
@@ -122,9 +124,14 @@ int main(int argc, char* argv[]) {
 
     for (k=0; k < NEXP; k++)
     {
+      tstart = clock();
       conntime = do_connect(server_port, server_ip, filename, "timing_results.txt");
+      tend = clock();
       ttime += conntime;
       times[k] = conntime;
+      totaltimes[k] = ((double)(tend - tstart))/CLOCKS_PER_SEC;
+      printf("[client] Time connect(): %lf\n", times[k]);
+      printf("[client] Total time connect+transfer: %lf\n", totaltimes[k]);
     }
 
     return 0;
