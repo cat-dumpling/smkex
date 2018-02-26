@@ -54,9 +54,9 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     server_addr.sin_port = htons(server_port);
 
     // Set no crypt mode
-    printf("[client] Setting no encryption on socket %d\n", client_sockfd);
-    ret = setsockopt(client_sockfd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
-    CHECK(ret == 0, "setsockopt");
+    //printf("[client] Setting no encryption on socket %d\n", client_sockfd);
+    //ret = setsockopt(client_sockfd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
+    //CHECK(ret == 0, "setsockopt");
 
     // Connect
     printf("[client] Before connect()\n");

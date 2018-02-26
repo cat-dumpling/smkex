@@ -81,9 +81,9 @@ int main(int argc, char* argv[]) {
     printf("[server] Server listening on port %d...\n", serv_port);
 
     // Set no encrypt option on server
-    printf("[server] Setting no encrypt for socket %d\n", listen_fd);
-    rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
-    CHECK(rc == 0, "setsockopt");
+    //printf("[server] Setting no encrypt for socket %d\n", listen_fd);
+    //rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
+    //CHECK(rc == 0, "setsockopt");
 
     // Open file
     int file_fd = open(filename, O_RDONLY);
