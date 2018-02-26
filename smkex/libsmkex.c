@@ -621,9 +621,6 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     fprintf(stderr, "O_NONBLOCK in flags of connect() on libsmkex: %d\n", flags & O_NONBLOCK);
 #endif
 
-    // REMOVE ME! Just for debug
-    goto connect_no_crypt;
-
     // check number of existing subflows (needed next)
     int cnt_subflows=0;
     socklen_t len_sockopt=1;
@@ -658,6 +655,9 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
         ids0, ids1);
 #endif
+
+    // REMOVE ME! Just for debug
+    goto connect_no_crypt;
 
     // Run ECDH key exchange
     EC_KEY* ec_key = __new_key_pair();
@@ -910,9 +910,6 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     fprintf(stderr, "accept: after poll on socket %d\n", accepted_fd);
 #endif
 
-    // REMOVE ME! Just for debug
-    goto accept_no_crypt;
-
     // check number of existing subflows (needed next)
     int cnt_subflows=0;
     socklen_t len_sockopt=1;
@@ -926,9 +923,8 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         return -1;
     }
 #if DEBUG
-    fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
+    fprintf(stderr, "accept: MPTCP returned %d available subflows\n", cnt_subflows);
 #endif
-
 
     // Find IDs of subflows
     struct mptcp_sub_ids *ids;
@@ -946,9 +942,12 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 #if DEBUG
-    fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
+    fprintf(stderr, "accept: MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
         ids0, ids1);
 #endif
+
+    // REMOVE ME! Just for debug
+    goto accept_no_crypt;
 
     // Perform DH key exchange
     EC_KEY* ec_key = __new_key_pair();
