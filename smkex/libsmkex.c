@@ -524,12 +524,18 @@ int __recv_dummy(int sockfd) {
     }
 
     // Get dummy packet on whatever channel is available
+#if DEBUG
+    fprintf(stderr, "libsmkex: in recv_dummy, before smkex_pkt_rcv\n");
+#endif
     ppkt->recv = original_recv;
     int rc = smkex_pkt_recv(ppkt, sockfd, 0);
     if (rc <= 0) {
         fprintf(stderr, "Error: Could not get dummy packet.\n");
         return -1;
     }
+#if DEBUG
+    fprintf(stderr, "libsmkex: in recv_dummy, after smkex_pkt_rcv\n");
+#endif
 
     // Discard dummy packet
     smkex_pkt_free(ppkt);
@@ -841,6 +847,9 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     *addrlen = 0;
     int accepted_fd = original_accept(sockfd, addr, addrlen);
     if (accepted_fd >= 0) {
+#if DEBUG
+        fprintf(stderr, "libsmkex: accepted new connection, fd=%d\n", accepted_fd);
+#endif
         mp_sockets[accepted_fd].used = 1;
         mp_sockets[accepted_fd].recv_buffer = NULL;
         mp_sockets[accepted_fd].recv_buffer_cursor = NULL;

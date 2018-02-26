@@ -88,6 +88,7 @@ int main(int argc, char* argv[]) {
         struct sockaddr_in client_addr;
         socklen_t client_len;
 
+        printf("[server] Before accept()\n");
         int connect_fd = accept(listen_fd, (struct sockaddr*)&client_addr, &client_len);
         CHECK(connect_fd >= 0, "accept");
         printf("[server] Got a request...\n");
@@ -96,7 +97,6 @@ int main(int argc, char* argv[]) {
         printf("[server] Sending file size (%zd)...\n", file_stat.st_size);
         rc = my_send(connect_fd, (char*)&file_size, sizeof(file_size));
         CHECK(rc >= 0, "send");
-
 
         while (1) {
             int bytes_read = read(file_fd, buf, BUFFER_SIZE);
@@ -109,6 +109,7 @@ int main(int argc, char* argv[]) {
             my_send(connect_fd, buf, bytes_read);
         }
         lseek(file_fd, 0, SEEK_SET);
+        printf("[server] File send completed\n");
 
         close(connect_fd);
     }
