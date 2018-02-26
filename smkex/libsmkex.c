@@ -451,6 +451,10 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
         fprintf(stderr, "Error: Could not get remote public key.\n");
         goto err_recv_remotekey;
     }
+#if DEBUG
+    fprintf(stderr, "Remote key received on socket %d, subflow %d\n",
+        sockfd, ids);
+#endif
 
     // Allocate new point for remote public key
     const EC_GROUP* ec_group = EC_KEY_get0_group(key);
@@ -573,11 +577,17 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     }
 
     // Send dummy packet to force creating two subflows
+#if DEBUG
+    fprintf(stderr, "libsmkex: sending dummy packet to force creating two subflows\n");
+#endif
     rc = __send_dummy(sockfd);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send dummy packet.\n");
         return -1;
     }
+#if DEBUG
+    fprintf(stderr, "libsmkex: dummy packet sent\n");
+#endif
 
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;
@@ -850,12 +860,18 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     }
 
     // Receive dummy packet to force creating two subflows
+#if DEBUG
+    fprintf(stderr, "libsmkex: receiving dummy packet to force creating two subflows\n");
+#endif
     int rc = __recv_dummy(accepted_fd);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not receive dummy packet.\n");
         mp_sockets[accepted_fd].used = 0;
         return -1;
     }
+#if DEBUG
+    fprintf(stderr, "libsmkex: dummy packet received\n");
+#endif
 
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;

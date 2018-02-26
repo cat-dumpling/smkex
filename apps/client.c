@@ -67,8 +67,9 @@ int main(int argc, char* argv[]) {
     server_addr.sin_port = htons(server_port);
 
     // Connect
+    printf("[client] Before connect()\n");
     ret = connect(client_sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr));
-    //CHECK(ret >= 0, "connect");
+    CHECK(ret >= 0, "connect");
     if(ret < 0)
       return -1;
     printf("[client] Connected to %d\n", server_port);
@@ -91,6 +92,7 @@ int main(int argc, char* argv[]) {
         write(file_fd, buffer, bytes_recv);
         total += bytes_recv;
     }
+    printf("[client] File receive completed\n");
 
     close(file_fd);
 
