@@ -432,6 +432,8 @@ free_ppkt_recv_check_si:
 EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     ssize_t (*original_recv)(int, void*, size_t, int) = dlsym(RTLD_NEXT, "recv");
 
+    int rval;
+
     // Get a new message from sockfd
     smkex_pkt* ppkt = smkex_pkt_allocate(0);
     if (ppkt == NULL) {
@@ -485,9 +487,10 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     memcpy(mp_sockets[sockfd].session.remote_pub_key, ppkt->value + SESSION_NONCE_LENGTH,
             remote_pub_key_length);
 
-    EC_POINT_oct2point(ec_group, remote_pub_key, mp_sockets[sockfd].session.remote_pub_key,
-                remote_pub_key_length, NULL);
-    if (remote_pub_key == NULL) {
+    rval = EC_POINT_oct2point(ec_group, remote_pub_key,
+                              mp_sockets[sockfd].session.remote_pub_key,
+                              remote_pub_key_length, NULL);
+    if (rval != 1) {
         fprintf(stderr, "Error: Could not convert remote public key to point.\n");
         goto err_recv_remotekey4;
     }
@@ -663,9 +666,12 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         goto err_connect;
     }
 
-    // REMOVE ME! Just for debug
-    EC_KEY_free(ec_key);
-    goto connect_no_crypt;
+    // Public keys received on the master subflow
+    EC_POINT* remote_pub_key = __recv_remote_key(sockfd, ec_key, ids0);
+    if (remote_pub_key == NULL) {
+        fprintf(stderr, "Error: Could not receive remote public key. \n");
+        goto err_connect2;
+    }
 
     // Public keys sent on the master subflow
     rc = __send_local_key(sockfd, ec_key, ids0);
@@ -674,12 +680,8 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         goto err_connect2;
     }
 
-    // Public keys received on the master subflow
-    EC_POINT* remote_pub_key = __recv_remote_key(sockfd, ec_key, ids0);
-    if (remote_pub_key == NULL) {
-        fprintf(stderr, "Error: Could not receive remote public key. \n");
-        goto err_connect2;
-    }
+    // REMOVE ME! Just for debug
+    goto connect_no_crypt;
 
     // Compute session key
     mp_sockets[sockfd].session_key = malloc(SESSION_KEY_LENGTH);
@@ -954,11 +956,6 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 
-    // REMOVE ME! Just for debug
-    EC_KEY_free(ec_key);
-    goto accept_no_crypt;
-
-
     // Public keys sent on the master subflow
     rc = __send_local_key(accepted_fd, ec_key, ids0);
     if (rc < 0) {
@@ -966,13 +963,15 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept2;
     }
 
-
     // Public keys received on the master subflow
     EC_POINT* remote_pub_key = __recv_remote_key(accepted_fd, ec_key, ids0);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not receive remote public key. \n");
         goto err_accept2;
     }
+
+    // REMOVE ME! Just for debug
+    goto accept_no_crypt;
 
     // TODO FIXLEAK: malloc is allocating less memory than needed
     // Compute session key
