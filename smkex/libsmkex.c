@@ -595,6 +595,9 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     fprintf(stderr, "libsmkex: dummy packet sent\n");
 #endif
 
+    // REMOVE ME! Just for debug
+    goto connect_no_crypt;
+
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;
     rc = original_setsockopt(sockfd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD, &slave_count,
@@ -881,6 +884,9 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 #if DEBUG
     fprintf(stderr, "libsmkex: dummy packet received\n");
 #endif
+
+    // REMOVE ME! Just for debug
+    goto accept_no_crypt;
 
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;
