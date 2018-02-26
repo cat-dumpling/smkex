@@ -644,6 +644,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     ids0 = ids->sub_status[0].id;
     ids1 = ids->sub_status[1].id;
+    free(ids); ids = NULL;
     if(rc < 0)
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
@@ -652,7 +653,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids->sub_status[0].id, ids->sub_status[1].id);
+        ids0, ids1);
 #endif
 
     // Run ECDH key exchange
@@ -742,13 +743,15 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     //struct mptcp_sub_ids *ids;
     //socklen_t ids_len;
     ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
-    free(ids); ids=NULL;
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
     if(ids == NULL)
     {
         goto err_connect5;
     }
     rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
+    ids0 = ids->sub_status[0].id;
+    ids1 = ids->sub_status[1].id;
+    free(ids); ids = NULL;
     if(rc < 0)
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
@@ -757,7 +760,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids->sub_status[0].id, ids->sub_status[1].id);
+        ids0, ids1);
 #endif
 
     // Receive session info on secondary channel
@@ -778,7 +781,6 @@ connect_no_crypt:
     fprintf(stderr, "libsmkex: finishing connect on socket %d\n", sockfd);
 #endif
 
-    free(ids); ids=NULL;
     //EC_POINT_free(remote_pub_key); remote_pub_key = NULL;
     //EC_KEY_free(ec_key); ec_key = NULL;
     return rc;
@@ -798,8 +800,6 @@ err_connect2:
     EC_KEY_free(ec_key);
 
 err_connect:
-    free(ids);
-
     free_session(sockfd);
     return -1;
 }
@@ -932,6 +932,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     ids0 = ids->sub_status[0].id;
     ids1 = ids->sub_status[1].id;
+    free(ids); ids = NULL;
     if(rc < 0)
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
@@ -940,7 +941,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids->sub_status[0].id, ids->sub_status[1].id);
+        ids0, ids1);
 #endif
 
     // Perform DH key exchange
@@ -1038,7 +1039,6 @@ accept_no_crypt:
     fprintf(stderr, "libsmkex: finishing accept on socket %d\n", sockfd);
 #endif
 
-    free(ids);
     //EC_POINT_free(remote_pub_key);
     //EC_KEY_free(ec_key);
     return accepted_fd;
@@ -1058,8 +1058,6 @@ err_accept2:
     EC_KEY_free(ec_key);
 
 err_accept:
-    free(ids);
-
     free_session(accepted_fd);
     return -1;
 }
