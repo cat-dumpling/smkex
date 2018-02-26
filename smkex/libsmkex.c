@@ -656,15 +656,16 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         ids0, ids1);
 #endif
 
-    // REMOVE ME! Just for debug
-    goto connect_no_crypt;
-
     // Run ECDH key exchange
     EC_KEY* ec_key = __new_key_pair();
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not generate local key pair.\n");
         goto err_connect;
     }
+
+    // REMOVE ME! Just for debug
+    EC_KEY_free(ec_key);
+    goto connect_no_crypt;
 
     // Public keys sent on the master subflow
     rc = __send_local_key(sockfd, ec_key, ids0);
@@ -946,15 +947,17 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         ids0, ids1);
 #endif
 
-    // REMOVE ME! Just for debug
-    goto accept_no_crypt;
-
     // Perform DH key exchange
     EC_KEY* ec_key = __new_key_pair();
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not generate local key pair.\n");
         goto err_accept;
     }
+
+    // REMOVE ME! Just for debug
+    EC_KEY_free(ec_key);
+    goto accept_no_crypt;
+
 
     // Public keys sent on the master subflow
     rc = __send_local_key(accepted_fd, ec_key, ids0);
