@@ -595,6 +595,9 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     fprintf(stderr, "libsmkex: dummy packet sent\n");
 #endif
 
+    // REMOVE ME! Just for debug
+    goto connect_no_crypt;
+
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;
     rc = original_setsockopt(sockfd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD, &slave_count,
@@ -620,9 +623,6 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     flags = original_fcntl(sockfd, F_GETFL, 0);
     fprintf(stderr, "O_NONBLOCK in flags of connect() on libsmkex: %d\n", flags & O_NONBLOCK);
 #endif
-
-    // REMOVE ME! Just for debug
-    goto connect_no_crypt;
 
     // check number of existing subflows (needed next)
     int cnt_subflows=0;
@@ -885,6 +885,9 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     fprintf(stderr, "libsmkex: dummy packet received\n");
 #endif
 
+    // REMOVE ME! Just for debug
+    goto accept_no_crypt;
+
     // Block while waiting for slave subflows to be ready
     int slave_count = 2;
     rc = original_setsockopt(accepted_fd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD,
@@ -909,9 +912,6 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 #if DEBUG
     fprintf(stderr, "accept: after poll on socket %d\n", accepted_fd);
 #endif
-
-    // REMOVE ME! Just for debug
-    goto accept_no_crypt;
 
 
     // check number of existing subflows (needed next)
