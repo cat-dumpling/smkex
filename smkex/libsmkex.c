@@ -123,7 +123,6 @@ void free_session(int sockfd)
 
 EC_KEY* __new_key_pair(void) {
     // Initialize new curve
-    // TODO: FIXLEAK: something leaks here (or in calling method)
     EC_KEY* ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1);
     if (ec_key == NULL) {
         fprintf(stderr, "Error: Could not create EC key.\n");
@@ -467,7 +466,6 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
 
     // Allocate new point for remote public key
     const EC_GROUP* ec_group = EC_KEY_get0_group(key);
-    // TODO: FIXLEAK: something leaks in the line below
     EC_POINT* remote_pub_key = EC_POINT_new(ec_group);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not create point for remote public key.\n");
@@ -711,14 +709,11 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         goto err_connect;
     }
 
-    // TODO DEBUG
 #if DEBUG
     printf("Key = ");
     hexdump(mp_sockets[sockfd].session_key, KDF_KEY_LENGTH);
     printf("\n");
 #endif
-    // TODO: Why was this line erasing the key ???
-    //memset(mp_sockets[sockfd].session_key, 0, KDF_KEY_LENGTH);
 
     mp_sockets[sockfd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[sockfd].iv == NULL) {
@@ -727,7 +722,6 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     }
     memset(mp_sockets[sockfd].iv, 0, SESSION_IV_LENGTH);
 
-    // TODO DEBUG
 #if DEBUG
     printf("Session local nonce = ");
     hexdump(mp_sockets[sockfd].session.local_nonce, SESSION_NONCE_LENGTH);
@@ -967,15 +961,11 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 
-
 #if DEBUG
     printf("Key = ");
     hexdump(mp_sockets[accepted_fd].session_key, KDF_KEY_LENGTH);
     printf("\n");
 #endif
-    // TODO: Why was this line erasing the key ???
-    //memset(mp_sockets[accepted_fd].session_key, 0, KDF_KEY_LENGTH);
-
 
     mp_sockets[accepted_fd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[accepted_fd].iv == NULL) {
