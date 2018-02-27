@@ -568,14 +568,26 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
 #endif
 
     int rc = original_connect(sockfd, address, address_len);
-    if (rc >= 0) {
-        mp_sockets[sockfd].used = 1;
-        mp_sockets[sockfd].recv_buffer = NULL;
-        mp_sockets[sockfd].recv_buffer_cursor = NULL;
-        mp_sockets[sockfd].recv_stored_ppkt = NULL;
-        mp_sockets[sockfd].recv_remaining = 0;
-        memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
+    if (rc < 0) {
+        fprintf(stderr, "Error: connect failed on socket %d.\n", sockfd);
+        return rc;
     }
+
+    if (mp_sockets[sockfd].used == 1)
+    {
+        fprintf(stderr, "Error (connect): already used SMKEX socket fd=%d.\n", sockfd);
+        errno = EBADF;
+        return -1;
+    }
+
+    mp_sockets[sockfd].used = 1;
+    mp_sockets[sockfd].session_key = NULL;
+    mp_sockets[sockfd].iv = NULL;
+    mp_sockets[sockfd].recv_buffer = NULL;
+    mp_sockets[sockfd].recv_buffer_cursor = NULL;
+    mp_sockets[sockfd].recv_stored_ppkt = NULL;
+    mp_sockets[sockfd].recv_remaining = 0;
+    memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
 
     if (mp_sockets[sockfd].no_crypt)
     {
@@ -670,14 +682,14 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     EC_POINT* remote_pub_key = __recv_remote_key(sockfd, ec_key, ids0);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not receive remote public key. \n");
-        goto err_connect2;
+        goto err_connect;
     }
 
     // Public keys sent on the master subflow
     rc = __send_local_key(sockfd, ec_key, ids0);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send local public key.\n");
-        goto err_connect2;
+        goto err_connect;
     }
 
     // REMOVE ME! Just for debug
@@ -687,13 +699,13 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     mp_sockets[sockfd].session_key = malloc(SESSION_KEY_LENGTH);
     if (mp_sockets[sockfd].session_key == NULL) {
         perror("malloc");
-        goto err_connect3;
+        goto err_connect;
     }
     rc = ECDH_compute_key(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
-        goto err_connect4;
+        goto err_connect;
     }
 
     // TODO DEBUG
@@ -707,7 +719,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     mp_sockets[sockfd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[sockfd].iv == NULL) {
         perror("malloc");
-        goto err_connect4;
+        goto err_connect;
     }
     memset(mp_sockets[sockfd].iv, 0, SESSION_IV_LENGTH);
 
@@ -738,7 +750,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     {
         fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
         perror("getsockopt");
-        goto err_connect5;
+        goto err_connect;
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
@@ -752,7 +764,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     ids = (struct mptcp_sub_ids *)malloc(ids_len);
     if(ids == NULL)
     {
-        goto err_connect5;
+        goto err_connect;
     }
     rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
     ids0 = ids->sub_status[0].id;
@@ -762,7 +774,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     {
         fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
         perror("getsockopt");
-        goto err_connect5;
+        goto err_connect;
     }
 #if DEBUG
     fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
@@ -773,7 +785,7 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     rc = __recv_check_session_info(sockfd, ids1);
     if (rc < 0) {
         fprintf(stderr, "Error: session info check failed.\n");
-        goto err_connect5;
+        goto err_connect;
     }
 
 #if DEBUG
@@ -791,21 +803,11 @@ connect_no_crypt:
     //EC_KEY_free(ec_key); ec_key = NULL;
     return rc;
 
-err_connect5:
-    free(mp_sockets[sockfd].iv);
-    mp_sockets[sockfd].iv = NULL;
-
-err_connect4:
-    free(mp_sockets[sockfd].session_key);
-    mp_sockets[sockfd].session_key = NULL;
-
-err_connect3:
-    EC_POINT_free(remote_pub_key);
-
-err_connect2:
-    EC_KEY_free(ec_key);
-
 err_connect:
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
     free_session(sockfd);
     return -1;
 }
@@ -852,18 +854,30 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 
     *addrlen = 0;
     int accepted_fd = original_accept(sockfd, addr, addrlen);
-    if (accepted_fd >= 0) {
-#if DEBUG
-        fprintf(stderr, "libsmkex: accepted new connection, fd=%d\n", accepted_fd);
-#endif
-        mp_sockets[accepted_fd].used = 1;
-        mp_sockets[accepted_fd].recv_buffer = NULL;
-        mp_sockets[accepted_fd].recv_buffer_cursor = NULL;
-        mp_sockets[accepted_fd].recv_stored_ppkt = NULL;
-        mp_sockets[accepted_fd].recv_remaining = 0;
-        mp_sockets[accepted_fd].no_crypt = mp_sockets[sockfd].no_crypt;
-        memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
+    if (accepted_fd < 0) {
+        fprintf(stderr, "Error: accept failed on socket %d.\n", sockfd);
+        return accepted_fd;
     }
+
+    if (mp_sockets[accepted_fd].used == 1)
+    {
+        fprintf(stderr, "Error (accept): already used SMKEX socket fd=%d.\n", sockfd);
+        errno = EBADF;
+        return -1;
+    }
+
+#if DEBUG
+    fprintf(stderr, "libsmkex: accepted new connection, fd=%d\n", accepted_fd);
+#endif
+    mp_sockets[accepted_fd].used = 1;
+    mp_sockets[accepted_fd].session_key = NULL;
+    mp_sockets[accepted_fd].iv = NULL;
+    mp_sockets[accepted_fd].recv_buffer = NULL;
+    mp_sockets[accepted_fd].recv_buffer_cursor = NULL;
+    mp_sockets[accepted_fd].recv_stored_ppkt = NULL;
+    mp_sockets[accepted_fd].recv_remaining = 0;
+    mp_sockets[accepted_fd].no_crypt = mp_sockets[sockfd].no_crypt;
+    memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
 
 
     if (mp_sockets[sockfd].no_crypt)
@@ -960,14 +974,14 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     rc = __send_local_key(accepted_fd, ec_key, ids0);
     if (rc < 0) {
         fprintf(stderr, "Error: Could not send local public key.\n");
-        goto err_accept2;
+        goto err_accept;
     }
 
     // Public keys received on the master subflow
     EC_POINT* remote_pub_key = __recv_remote_key(accepted_fd, ec_key, ids0);
     if (remote_pub_key == NULL) {
         fprintf(stderr, "Error: Could not receive remote public key. \n");
-        goto err_accept2;
+        goto err_accept;
     }
 
     // REMOVE ME! Just for debug
@@ -978,13 +992,13 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     mp_sockets[accepted_fd].session_key = malloc(2*SESSION_KEY_LENGTH);
     if (mp_sockets[accepted_fd].session_key == NULL) {
         perror("malloc");
-        goto err_accept3;
+        goto err_accept;
     }
     rc = ECDH_compute_key(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
-        goto err_accept4;
+        goto err_accept;
     }
 
 #if DEBUG
@@ -998,7 +1012,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     mp_sockets[accepted_fd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[accepted_fd].iv == NULL) {
         perror("malloc");
-        goto err_accept4;
+        goto err_accept;
     }
     memset(mp_sockets[accepted_fd].iv, 0, SESSION_IV_LENGTH);
 
@@ -1032,7 +1046,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     rc = __send_session_info(accepted_fd, ids1);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session info.\n");
-        goto err_accept5;
+        goto err_accept;
     }
 
 #if DEBUG
@@ -1050,21 +1064,12 @@ accept_no_crypt:
     //EC_KEY_free(ec_key);
     return accepted_fd;
 
-err_accept5:
-    free(mp_sockets[accepted_fd].iv);
-    mp_sockets[accepted_fd].iv = NULL;
-
-err_accept4:
-    free(mp_sockets[accepted_fd].session_key);
-    mp_sockets[accepted_fd].session_key = NULL;
-
-err_accept3:
-    EC_POINT_free(remote_pub_key);
-
-err_accept2:
-    EC_KEY_free(ec_key);
-
 err_accept:
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
+
     free_session(accepted_fd);
     return -1;
 }
