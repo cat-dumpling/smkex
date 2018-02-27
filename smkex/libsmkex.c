@@ -302,7 +302,6 @@ int __send_session_info(int sockfd, int ids) {
             mp_sockets[sockfd].iv, ppkt->value, &ppkt->length);
     if (rc < 0) {
         fprintf(stderr, "Error: aesgcm encryption failed.\n");
-        smkex_pkt_free(ppkt);
         goto err_sess_info;
     }
 
@@ -324,17 +323,22 @@ int __send_session_info(int sockfd, int ids) {
 #endif
     // Send session info on secondary channel
     rc = smkex_pkt_send(ppkt, sockfd, select_subflow(0, ids));
-    smkex_pkt_free(ppkt);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session ciphertext.\n");
         goto err_sess_info;
     }
 
-    free(session);
+    if(session != NULL)
+      free(session);
+    if(ppkt != NULL)
+      smkex_pkt_free(ppkt);
     return 0;
 
 err_sess_info:
-    free(session);
+    if(session != NULL)
+      free(session);
+    if(ppkt != NULL)
+      smkex_pkt_free(ppkt);
     return -1;
 }
 
@@ -424,7 +428,10 @@ int __recv_check_session_info(int sockfd, int ids) {
     }
 
 free_ppkt_recv_check_si:
-    smkex_pkt_free(ppkt);
+    if(session_info != NULL)
+      free(session_info);
+    if(ppkt != NULL)
+      smkex_pkt_free(ppkt);
     return retval;
 }
 
@@ -471,7 +478,7 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     mp_sockets[sockfd].session.remote_nonce = malloc(SESSION_NONCE_LENGTH);
     if (mp_sockets[sockfd].session.remote_nonce == NULL) {
         fprintf(stderr, "Error: could not allocate memory for remote nonce.\n");
-        goto err_recv_remotekey2;
+        goto err_recv_remotekey;
     }
 
     memcpy(mp_sockets[sockfd].session.remote_nonce, ppkt->value, SESSION_NONCE_LENGTH);
@@ -482,7 +489,7 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
     mp_sockets[sockfd].session.remote_pub_key_length = remote_pub_key_length;
     if (mp_sockets[sockfd].session.remote_pub_key == NULL) {
         fprintf(stderr, "Error: could not allocate memory for remote public key.\n");
-        goto err_recv_remotekey3;
+        goto err_recv_remotekey;
     }
     memcpy(mp_sockets[sockfd].session.remote_pub_key, ppkt->value + SESSION_NONCE_LENGTH,
             remote_pub_key_length);
@@ -492,26 +499,23 @@ EC_POINT* __recv_remote_key(int sockfd, EC_KEY* key, int ids) {
                               remote_pub_key_length, NULL);
     if (rval != 1) {
         fprintf(stderr, "Error: Could not convert remote public key to point.\n");
-        goto err_recv_remotekey4;
+        goto err_recv_remotekey;
     }
 
     smkex_pkt_free(ppkt);
     return remote_pub_key;
 
-err_recv_remotekey4:
-    free(mp_sockets[sockfd].session.remote_pub_key);
-    mp_sockets[sockfd].session.remote_pub_key = NULL;
-
-err_recv_remotekey3:
-    free(mp_sockets[sockfd].session.remote_nonce);
-    mp_sockets[sockfd].session.remote_nonce = NULL;
-
-err_recv_remotekey2:
-    EC_POINT_free(remote_pub_key);
-    remote_pub_key = NULL;
-
 err_recv_remotekey:
-    smkex_pkt_free(ppkt);
+    if(mp_sockets[sockfd].session.remote_pub_key != NULL)
+      free(mp_sockets[sockfd].session.remote_pub_key);
+    mp_sockets[sockfd].session.remote_pub_key = NULL;
+    if(mp_sockets[sockfd].session.remote_nonce != NULL)
+      free(mp_sockets[sockfd].session.remote_nonce);
+    mp_sockets[sockfd].session.remote_nonce = NULL;
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ppkt != NULL)
+      smkex_pkt_free(ppkt);
 
     return NULL;
 }
@@ -742,55 +746,6 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     printf("\n");
 #endif
 
-    // REMOVE ME! Just for debug
-    fprintf(stderr,"Connect: Session key has %d bytes, KEY_LEN=%d.\n",
-            rc, SESSION_KEY_LENGTH);
-    if(remote_pub_key != NULL)
-      EC_POINT_free(remote_pub_key);
-    if(ec_key != NULL)
-      EC_KEY_free(ec_key);
-    goto connect_no_crypt;
-
-
-    // First check number of existing subflows (needed next)
-    cnt_subflows=0;
-    len_sockopt=1;
-    rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_EST_COUNT, &cnt_subflows, &len_sockopt);
-    if(rc < 0)
-    {
-        fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
-        perror("getsockopt");
-        goto err_connect;
-    }
-#if DEBUG
-    fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
-#endif
-
-
-    // Find IDs of subflows
-    //struct mptcp_sub_ids *ids;
-    //socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
-    ids = (struct mptcp_sub_ids *)malloc(ids_len);
-    if(ids == NULL)
-    {
-        goto err_connect;
-    }
-    rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
-    ids0 = ids->sub_status[0].id;
-    ids1 = ids->sub_status[1].id;
-    free(ids); ids = NULL;
-    if(rc < 0)
-    {
-        fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
-        perror("getsockopt");
-        goto err_connect;
-    }
-#if DEBUG
-    fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids0, ids1);
-#endif
-
     // Receive session info on secondary channel
     rc = __recv_check_session_info(sockfd, ids1);
     if (rc < 0) {
@@ -809,8 +764,11 @@ connect_no_crypt:
     fprintf(stderr, "libsmkex: finishing connect on socket %d\n", sockfd);
 #endif
 
-    //EC_POINT_free(remote_pub_key); remote_pub_key = NULL;
-    //EC_KEY_free(ec_key); ec_key = NULL;
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
+
     return rc;
 
 err_connect:
@@ -1046,16 +1004,6 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     fprintf(stderr, "Accept: before send_session_info() on socket %d\n", accepted_fd);
 #endif
 
-    // REMOVE ME! Just for debug
-    fprintf(stderr,"Accept: Session key has %d bytes, KEY_LEN=%d.\n",
-            rc, SESSION_KEY_LENGTH);
-    if(remote_pub_key != NULL)
-      EC_POINT_free(remote_pub_key);
-    if(ec_key != NULL)
-      EC_KEY_free(ec_key);
-    goto accept_no_crypt;
-
-
     // Set flag to perform hack on first byte of session_info data if we are
     // simulating an attacker
     if(mp_sockets[sockfd].do_session_attack)
@@ -1063,6 +1011,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     else
       mp_sockets[accepted_fd].do_session_attack = 0;
     
+    // Send session info on second channel
     rc = __send_session_info(accepted_fd, ids1);
     if (rc < 0) {
         fprintf(stderr, "Error: could not send session info.\n");
@@ -1080,8 +1029,10 @@ accept_no_crypt:
     fprintf(stderr, "libsmkex: finishing accept on socket %d\n", sockfd);
 #endif
 
-    //EC_POINT_free(remote_pub_key);
-    //EC_KEY_free(ec_key);
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
     return accepted_fd;
 
 err_accept:
