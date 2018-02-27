@@ -42,9 +42,9 @@ int mp_aesgcm_encrypt(const unsigned char * ptext,
         unsigned char * ctext,
         size_t * clen) {
             
-    memcpy(ctext, ptext, plen);
-    *clen = plen;
-    return 1;
+    //memcpy(ctext, ptext, plen);
+    //*clen = plen;
+    //return 1;
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     OPENSSL_assert(ctx != NULL);
@@ -92,9 +92,9 @@ int mp_aesgcm_decrypt(const unsigned char * ctext,
         unsigned char * ptext,
         size_t * plen) {
             
-    memcpy(ptext, ctext, clen);
-    *plen = clen;
-    return 1;
+    //memcpy(ptext, ctext, clen);
+    //*plen = clen;
+    //return 1;
 
     EVP_CIPHER_CTX * ctx;
     int out_len;

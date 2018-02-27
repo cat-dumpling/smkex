@@ -696,15 +696,15 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         goto err_connect;
     }
 
-    // Compute session key
+    // Compute derived key
     // Note: although SESSION_KEY_LEN is 32 bytes, the derived key is 64 bytes !
-    mp_sockets[sockfd].session_key = malloc(2*SESSION_KEY_LENGTH);
+    mp_sockets[sockfd].session_key = malloc(KDF_KEY_LENGTH);
     if (mp_sockets[sockfd].session_key == NULL) {
         perror("malloc");
         goto err_connect;
     }
-    memset(mp_sockets[sockfd].session_key, 0, 2*SESSION_KEY_LENGTH);
-    rc = ECDH_compute_key(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH,
+    memset(mp_sockets[sockfd].session_key, 0, KDF_KEY_LENGTH);
+    rc = ECDH_compute_key(mp_sockets[sockfd].session_key, KDF_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
@@ -714,11 +714,11 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     // TODO DEBUG
 #if DEBUG
     printf("Key = ");
-    hexdump(mp_sockets[sockfd].session_key, 2*SESSION_KEY_LENGTH);
+    hexdump(mp_sockets[sockfd].session_key, KDF_KEY_LENGTH);
     printf("\n");
 #endif
-    // TODO: Why do we erase the key ???
-    memset(mp_sockets[sockfd].session_key, 0, SESSION_KEY_LENGTH);
+    // TODO: Why was this line erasing the key ???
+    //memset(mp_sockets[sockfd].session_key, 0, KDF_KEY_LENGTH);
 
     mp_sockets[sockfd].iv = malloc(SESSION_IV_LENGTH);
     if (mp_sockets[sockfd].iv == NULL) {
@@ -952,15 +952,15 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 
-    // Compute session key
+    // Compute derived key
     // Note: although SESSION_KEY_LEN is 32 bytes, the derived key is 64 bytes !
-    mp_sockets[accepted_fd].session_key = malloc(2*SESSION_KEY_LENGTH);
+    mp_sockets[accepted_fd].session_key = malloc(KDF_KEY_LENGTH);
     if (mp_sockets[accepted_fd].session_key == NULL) {
         perror("malloc");
         goto err_accept;
     }
-    memset(mp_sockets[accepted_fd].session_key, 0, 2*SESSION_KEY_LENGTH);
-    rc = ECDH_compute_key(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH,
+    memset(mp_sockets[accepted_fd].session_key, 0, KDF_KEY_LENGTH);
+    rc = ECDH_compute_key(mp_sockets[accepted_fd].session_key, KDF_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
         fprintf(stderr, "Error: Could not compute shared secret. \n");
@@ -970,11 +970,11 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 
 #if DEBUG
     printf("Key = ");
-    hexdump(mp_sockets[accepted_fd].session_key, 2*SESSION_KEY_LENGTH);
+    hexdump(mp_sockets[accepted_fd].session_key, KDF_KEY_LENGTH);
     printf("\n");
 #endif
-    // TODO: Why do we erase the key ???
-    memset(mp_sockets[accepted_fd].session_key, 0, SESSION_KEY_LENGTH);
+    // TODO: Why was this line erasing the key ???
+    //memset(mp_sockets[accepted_fd].session_key, 0, KDF_KEY_LENGTH);
 
 
     mp_sockets[accepted_fd].iv = malloc(SESSION_IV_LENGTH);
