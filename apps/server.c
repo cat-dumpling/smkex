@@ -100,7 +100,7 @@ int main(int argc, char* argv[]) {
         CHECK(connect_fd >= 0, "accept");
         printf("[server] Got a request...\n");
 
-        /*
+        ///*
         uint32_t file_size = htonl((uint32_t)file_stat.st_size);
         printf("[server] Sending file size (%zd)...\n", file_stat.st_size);
         rc = my_send(connect_fd, (char*)&file_size, sizeof(file_size));
@@ -110,7 +110,6 @@ int main(int argc, char* argv[]) {
             int bytes_read = read(file_fd, buf, BUFFER_SIZE);
             CHECK(bytes_read >= 0, "read");
 
-            //
             if (bytes_read == 0)
                 break;
 
@@ -118,7 +117,7 @@ int main(int argc, char* argv[]) {
         }
         lseek(file_fd, 0, SEEK_SET);
         printf("[server] File send completed\n");
-        */
+        //*/
 
         close(connect_fd);
         printf("[server] Connection closed on socket %d...\n", connect_fd);
