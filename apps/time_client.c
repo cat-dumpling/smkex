@@ -15,7 +15,7 @@
 #include <time.h>
 
 #define BUFFER_SIZE 4096
-#define NEXP 1
+#define NEXP 2
 
 #define SERVER_PORT     1337
 #define SERVER_IP       "127.0.0.1"
@@ -78,7 +78,7 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     
 
     // Recv file size
-    /*
+    ///*
     uint32_t file_size, file_size_net;
     my_receive(client_sockfd, (char*)&file_size_net, sizeof(file_size_net));
     file_size = ntohl(file_size_net);
@@ -99,7 +99,7 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     printf("[client] File receive completed\n");
 
     close(file_fd);
-    */
+    //*/
 
     return tspent;
 }
