@@ -692,15 +692,14 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
         goto err_connect;
     }
 
-    // REMOVE ME! Just for debug
-    goto connect_no_crypt;
-
     // Compute session key
-    mp_sockets[sockfd].session_key = malloc(SESSION_KEY_LENGTH);
+    // Note: although SESSION_KEY_LEN is 32 bytes, the derived key is 64 bytes !
+    mp_sockets[sockfd].session_key = malloc(2*SESSION_KEY_LENGTH);
     if (mp_sockets[sockfd].session_key == NULL) {
         perror("malloc");
         goto err_connect;
     }
+    memset(mp_sockets[sockfd].session_key, 0, 2*SESSION_KEY_LENGTH);
     rc = ECDH_compute_key(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
@@ -711,9 +710,10 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     // TODO DEBUG
 #if DEBUG
     printf("Key = ");
-    hexdump(mp_sockets[sockfd].session_key, SESSION_KEY_LENGTH);
+    hexdump(mp_sockets[sockfd].session_key, 2*SESSION_KEY_LENGTH);
     printf("\n");
 #endif
+    // TODO: Why do we erase the key ???
     memset(mp_sockets[sockfd].session_key, 0, SESSION_KEY_LENGTH);
 
     mp_sockets[sockfd].iv = malloc(SESSION_IV_LENGTH);
@@ -741,6 +741,16 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
             mp_sockets[sockfd].session.remote_pub_key_length);
     printf("\n");
 #endif
+
+    // REMOVE ME! Just for debug
+    fprintf(stderr,"Connect: Session key has %d bytes, KEY_LEN=%d.\n",
+            rc, SESSION_KEY_LENGTH);
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
+    goto connect_no_crypt;
+
 
     // First check number of existing subflows (needed next)
     cnt_subflows=0;
@@ -984,16 +994,14 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 
-    // REMOVE ME! Just for debug
-    goto accept_no_crypt;
-
-    // TODO FIXLEAK: malloc is allocating less memory than needed
     // Compute session key
+    // Note: although SESSION_KEY_LEN is 32 bytes, the derived key is 64 bytes !
     mp_sockets[accepted_fd].session_key = malloc(2*SESSION_KEY_LENGTH);
     if (mp_sockets[accepted_fd].session_key == NULL) {
         perror("malloc");
         goto err_accept;
     }
+    memset(mp_sockets[accepted_fd].session_key, 0, 2*SESSION_KEY_LENGTH);
     rc = ECDH_compute_key(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH,
             remote_pub_key, ec_key, nist_800_kdf);
     if (rc == 0) {
@@ -1001,11 +1009,13 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
         goto err_accept;
     }
 
+
 #if DEBUG
     printf("Key = ");
-    hexdump(mp_sockets[accepted_fd].session_key, SESSION_KEY_LENGTH);
+    hexdump(mp_sockets[accepted_fd].session_key, 2*SESSION_KEY_LENGTH);
     printf("\n");
 #endif
+    // TODO: Why do we erase the key ???
     memset(mp_sockets[accepted_fd].session_key, 0, SESSION_KEY_LENGTH);
 
 
@@ -1035,6 +1045,16 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
 
     fprintf(stderr, "Accept: before send_session_info() on socket %d\n", accepted_fd);
 #endif
+
+    // REMOVE ME! Just for debug
+    fprintf(stderr,"Accept: Session key has %d bytes, KEY_LEN=%d.\n",
+            rc, SESSION_KEY_LENGTH);
+    if(remote_pub_key != NULL)
+      EC_POINT_free(remote_pub_key);
+    if(ec_key != NULL)
+      EC_KEY_free(ec_key);
+    goto accept_no_crypt;
+
 
     // Set flag to perform hack on first byte of session_info data if we are
     // simulating an attacker
