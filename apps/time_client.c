@@ -21,6 +21,8 @@
 #define SERVER_IP       "127.0.0.1"
 #define FILENAME        "recv_file"
 
+#define SO_SMKEX_NOCRYPT 0xA001
+
 void my_receive(int sockfd, char * buffer, int length) {
     int bytes_received = 0;
     int rc;
@@ -51,11 +53,17 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     server_addr.sin_addr.s_addr = inet_addr(server_ip);
     server_addr.sin_port = htons(server_port);
 
+    // Set no crypt mode
+    //printf("[client] Setting no encryption on socket %d\n", client_sockfd);
+    //ret = setsockopt(client_sockfd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
+    //CHECK(ret == 0, "setsockopt");
+
     // Connect
+    printf("[client] Before connect()\n");
     tstart = clock();
     ret = connect(client_sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr));
     tend = clock();
-    //CHECK(ret >= 0, "connect");
+    CHECK(ret >= 0, "connect");
     if(ret < 0)
       return -1;
     printf("[client] Connected to %d\n", server_port);
@@ -66,9 +74,11 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     FILE *fd_res = fopen(fn_res, "a+");
     CHECK(fd_res >= 0, "open");
     fprintf(fd_res, "%lf\n", tspent);
+    fclose(fd_res);
     
 
     // Recv file size
+    ///*
     uint32_t file_size, file_size_net;
     my_receive(client_sockfd, (char*)&file_size_net, sizeof(file_size_net));
     file_size = ntohl(file_size_net);
@@ -86,9 +96,10 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
         write(file_fd, buffer, bytes_recv);
         total += bytes_recv;
     }
+    printf("[client] File receive completed\n");
 
     close(file_fd);
-    fclose(fd_res);
+    //*/
 
     return tspent;
 }

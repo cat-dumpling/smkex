@@ -18,6 +18,8 @@
 
 #define BUFFER_SIZE  4096
 
+#define SO_SMKEX_NOCRYPT 0xA001
+
 
 int my_send(int sockfd, char * buffer, int length) {
     int bytes_sent = 0;
@@ -78,6 +80,11 @@ int main(int argc, char* argv[]) {
 
     printf("[server] Server listening on port %d...\n", serv_port);
 
+    // Set no encrypt option on server
+    //printf("[server] Setting no encrypt for socket %d\n", listen_fd);
+    //rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
+    //CHECK(rc == 0, "setsockopt");
+
     // Open file
     int file_fd = open(filename, O_RDONLY);
     CHECK(file_fd >= 0, "open");
@@ -93,6 +100,7 @@ int main(int argc, char* argv[]) {
         CHECK(connect_fd >= 0, "accept");
         printf("[server] Got a request...\n");
 
+        ///*
         uint32_t file_size = htonl((uint32_t)file_stat.st_size);
         printf("[server] Sending file size (%zd)...\n", file_stat.st_size);
         rc = my_send(connect_fd, (char*)&file_size, sizeof(file_size));
@@ -102,7 +110,6 @@ int main(int argc, char* argv[]) {
             int bytes_read = read(file_fd, buf, BUFFER_SIZE);
             CHECK(bytes_read >= 0, "read");
 
-            /* Done reading from file */
             if (bytes_read == 0)
                 break;
 
@@ -110,8 +117,10 @@ int main(int argc, char* argv[]) {
         }
         lseek(file_fd, 0, SEEK_SET);
         printf("[server] File send completed\n");
+        //*/
 
         close(connect_fd);
+        printf("[server] Connection closed on socket %d...\n", connect_fd);
     }
 
     close(listen_fd);
