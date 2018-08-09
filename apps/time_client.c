@@ -15,7 +15,7 @@
 #include <time.h>
 
 #define BUFFER_SIZE 4096
-#define NEXP 1
+#define NEXP 2
 
 #define SERVER_PORT     1337
 #define SERVER_IP       "127.0.0.1"
