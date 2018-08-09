@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <arpa/inet.h>
 
-#define DEBUG 1
+#define DEBUG 0
 
 smkex_pkt* __smkex_pkt_new(void) {
     smkex_pkt* ppkt = malloc(sizeof(smkex_pkt));

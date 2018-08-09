@@ -19,6 +19,7 @@
 #define BUFFER_SIZE  4096
 
 #define SO_SMKEX_NOCRYPT 0xA001
+#define SO_SMKEX_DHONLY 0xA002
 
 
 int my_send(int sockfd, char * buffer, int length) {
@@ -41,9 +42,10 @@ int main(int argc, char* argv[]) {
     struct stat file_stat;
     char buf[BUFFER_SIZE];
     int rc;
+    char dh_only = 0;
 
     int opt;
-    while ((opt = getopt(argc, argv, "i:p:f:")) != -1) {
+    while ((opt = getopt(argc, argv, "i:p:f:d")) != -1) {
         switch (opt) {
             case 'i':
                 serv_ip = optarg;
@@ -54,8 +56,11 @@ int main(int argc, char* argv[]) {
             case 'f':
                 filename = optarg;
                 break;
+            case 'd':
+                dh_only = 1;
+                break;
             default:
-                fprintf(stderr, "Usage %s [-i IP] [-p PORT] [-f FILENAME]\n", argv[0]);
+                fprintf(stderr, "Usage %s [-i IP] [-p PORT] [-f FILENAME] [-d]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
@@ -84,6 +89,14 @@ int main(int argc, char* argv[]) {
     //printf("[server] Setting no encrypt for socket %d\n", listen_fd);
     //rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
     //CHECK(rc == 0, "setsockopt");
+    
+    // Set only DH if requested
+    if (dh_only)
+    {
+      printf("[server] Setting DH ONLY for socket %d\n", listen_fd);
+      rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_DHONLY, NULL, 0);
+      CHECK(rc == 0, "setsockopt");
+    }
 
     // Open file
     int file_fd = open(filename, O_RDONLY);

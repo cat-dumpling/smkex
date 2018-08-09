@@ -25,9 +25,10 @@
 
 #define SMKEX_MAX_FD    1024
 #define SO_SMKEX_NOCRYPT 0xA001
+#define SO_SMKEX_DHONLY  0xA002
 
-#define DEBUG 1
-#define VERBOSE 1
+#define DEBUG 0
+#define VERBOSE 0
 
 #define POLLCONN    0x800
 
@@ -65,9 +66,11 @@ struct mp_socket_s {
 
     int connected; // for client socket
     int accepted;  // for server socket
-    //int req_noblock; // signal fcntl(...,O_NONBLOCK) request
+
+    // These are only for debugging purposes -- remove in public version
     int no_crypt; // to signal that we want a standard TCP connection (no encryption)
     int do_session_attack; // used to simulate attacker
+    int dh_only; // to signal that we want a standard DH connection (no hash on second channel)
 } mp_sockets[SMKEX_MAX_FD];
 
 int initialized = 0;
@@ -599,79 +602,85 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
       goto connect_no_crypt;
     }
 
-    // Send dummy packet to force creating two subflows
-#if DEBUG
-    fprintf(stderr, "libsmkex: sending dummy packet to force creating two subflows\n");
-#endif
-    rc = __send_dummy(sockfd);
-    if (rc < 0) {
-        fprintf(stderr, "Error: Could not send dummy packet.\n");
-        return -1;
-    }
-#if DEBUG
-    fprintf(stderr, "libsmkex: dummy packet sent\n");
-#endif
-
-    // Block while waiting for slave subflows to be ready
-    int slave_count = 2;
-    rc = original_setsockopt(sockfd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD, &slave_count,
-        sizeof(int));
-    if (rc < 0) {
-        fprintf(stderr, "Error: could not set slave threshold.\n");
-        return -1;
-    }
-
-#if DEBUG
-    fprintf(stderr, "Connect: before poll on socket %d\n", sockfd);
-#endif
-
-    // Wait using poll
-    struct pollfd fds[1];
-    memset(fds, 0, sizeof(struct pollfd));
-    fds[0].fd = sockfd;
-    fds[0].events |= POLLCONN;
-    poll(fds, 1, -1);
-
-#if DEBUG
-    fprintf(stderr, "Connect: after poll on socket %d\n", sockfd);
-    flags = original_fcntl(sockfd, F_GETFL, 0);
-    fprintf(stderr, "O_NONBLOCK in flags of connect() on libsmkex: %d\n", flags & O_NONBLOCK);
-#endif
-
-    // check number of existing subflows (needed next)
-    int cnt_subflows=0;
-    socklen_t len_sockopt=1;
-    rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_EST_COUNT, &cnt_subflows, &len_sockopt);
-    if(rc < 0)
+    if (mp_sockets[sockfd].dh_only == 0)
     {
-        fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
-        perror("getsockopt");
-        return -1;
-    }
+      // Send dummy packet to force creating two subflows
 #if DEBUG
-    fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
+      fprintf(stderr, "libsmkex: sending dummy packet to force creating two subflows\n");
+#endif
+      rc = __send_dummy(sockfd);
+      if (rc < 0) {
+          fprintf(stderr, "Error: Could not send dummy packet.\n");
+          return -1;
+      }
+#if DEBUG
+      fprintf(stderr, "libsmkex: dummy packet sent\n");
+#endif
+
+      // Block while waiting for slave subflows to be ready
+      int slave_count = 2;
+      rc = original_setsockopt(sockfd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD, &slave_count,
+          sizeof(int));
+      if (rc < 0) {
+          fprintf(stderr, "Error: could not set slave threshold.\n");
+          return -1;
+      }
+
+#if DEBUG
+      fprintf(stderr, "Connect: before poll on socket %d\n", sockfd);
+#endif
+      // Wait using poll
+      struct pollfd fds[1];
+      memset(fds, 0, sizeof(struct pollfd));
+      fds[0].fd = sockfd;
+      fds[0].events |= POLLCONN;
+      poll(fds, 1, -1);
+#if DEBUG
+      fprintf(stderr, "Connect: after poll on socket %d\n", sockfd);
+      flags = original_fcntl(sockfd, F_GETFL, 0);
+      fprintf(stderr, "O_NONBLOCK in flags of connect() on libsmkex: %d\n", flags & O_NONBLOCK);
+#endif
+
+      // check number of existing subflows (needed next)
+      int cnt_subflows=0;
+      socklen_t len_sockopt=1;
+      rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_EST_COUNT, &cnt_subflows, &len_sockopt);
+      if(rc < 0)
+      {
+          fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
+          perror("getsockopt");
+          return -1;
+      }
+#if DEBUG
+      fprintf(stderr, "MPTCP returned %d available subflows\n", cnt_subflows);
 #endif
 
 
-    // Find IDs of subflows
-    struct mptcp_sub_ids *ids;
-    socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
-    ids = (struct mptcp_sub_ids *)malloc(ids_len);
-    rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
-    ids0 = ids->sub_status[0].id;
-    ids1 = ids->sub_status[1].id;
-    free(ids); ids = NULL;
-    if(rc < 0)
+      // Find IDs of subflows
+      struct mptcp_sub_ids *ids;
+      socklen_t ids_len;
+      ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
+      ids = (struct mptcp_sub_ids *)malloc(ids_len);
+      rc = getsockopt(sockfd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
+      ids0 = ids->sub_status[0].id;
+      ids1 = ids->sub_status[1].id;
+      free(ids); ids = NULL;
+      if(rc < 0)
+      {
+          fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
+          perror("getsockopt");
+          return -1;
+      }
+#if DEBUG
+      fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
+          ids0, ids1);
+#endif
+    }
+    else
     {
-        fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
-        perror("getsockopt");
-        return -1;
+      ids0 = 0;
+      ids1 = 0;
     }
-#if DEBUG
-    fprintf(stderr, "MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids0, ids1);
-#endif
 
     // Run ECDH key exchange
     EC_KEY* ec_key = __new_key_pair();
@@ -740,16 +749,18 @@ int connect(int sockfd, const struct sockaddr* address, socklen_t address_len) {
     printf("\n");
 #endif
 
-    // Receive session info on secondary channel
-    rc = __recv_check_session_info(sockfd, ids1);
-    if (rc < 0) {
-        fprintf(stderr, "Error: session info check failed.\n");
-        goto err_connect;
-    }
-
+    if (mp_sockets[sockfd].dh_only == 0)
+    {
+      // Receive session info on secondary channel
+      rc = __recv_check_session_info(sockfd, ids1);
+      if (rc < 0) {
+          fprintf(stderr, "Error: session info check failed.\n");
+          goto err_connect;
+      }
 #if DEBUG
-    fprintf(stderr, "Connect: after receiving session info on socket %d\n", sockfd);
+      fprintf(stderr, "Connect: after receiving session info on socket %d\n", sockfd);
 #endif
+    }
 
 connect_no_crypt:
     mp_sockets[sockfd].connected = 1;
@@ -803,6 +814,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     int (*original_setsockopt)(int, int, int, const void*, socklen_t) = dlsym(RTLD_NEXT, "setsockopt");
     __initialize();
     int ids0, ids1;
+    int rc;
 
     if (sockfd < 0 || sockfd >= SMKEX_MAX_FD) {
         fprintf(stderr, "Error: unsupported socket fd = %d.\n", sockfd);
@@ -839,7 +851,7 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     mp_sockets[accepted_fd].recv_stored_ppkt = NULL;
     mp_sockets[accepted_fd].recv_remaining = 0;
     mp_sockets[accepted_fd].no_crypt = mp_sockets[sockfd].no_crypt;
-    memset(&mp_sockets[sockfd].session, 0, sizeof(mp_sockets[sockfd].session));
+    memset(&mp_sockets[accepted_fd].session, 0, sizeof(mp_sockets[accepted_fd].session));
 
 
     if (mp_sockets[sockfd].no_crypt)
@@ -850,80 +862,88 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
       goto accept_no_crypt;
     }
 
-    // Receive dummy packet to force creating two subflows
-#if DEBUG
-    fprintf(stderr, "libsmkex: receiving dummy packet to force creating two subflows\n");
-#endif
-    int rc = __recv_dummy(accepted_fd);
-    if (rc < 0) {
-        fprintf(stderr, "Error: Could not receive dummy packet.\n");
-        mp_sockets[accepted_fd].used = 0;
-        return -1;
-    }
-#if DEBUG
-    fprintf(stderr, "libsmkex: dummy packet received\n");
-#endif
-
-    // Block while waiting for slave subflows to be ready
-    int slave_count = 2;
-    rc = original_setsockopt(accepted_fd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD,
-        &slave_count, sizeof(int));
-    if (rc < 0) {
-        fprintf(stderr, "Error: could not set slave threshold.\n");
-        mp_sockets[accepted_fd].used = 0;
-        return -1;
-    }
-
-#if DEBUG
-    fprintf(stderr, "accept: before poll on socket %d\n", accepted_fd);
-#endif
-
-    // Wait using poll
-    struct pollfd fds[1];
-    memset(fds, 0, sizeof(struct pollfd));
-    fds[0].fd = accepted_fd;
-    fds[0].events |= POLLCONN;
-    poll(fds, 1, -1);
-
-#if DEBUG
-    fprintf(stderr, "accept: after poll on socket %d\n", accepted_fd);
-#endif
-
-    // check number of existing subflows (needed next)
-    int cnt_subflows=0;
-    socklen_t len_sockopt=1;
-    rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_EST_COUNT,
-                    &cnt_subflows, &len_sockopt);
-    if(rc < 0)
+    if (mp_sockets[sockfd].dh_only == 0)
     {
-        fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
-        perror("getsockopt");
-        mp_sockets[accepted_fd].used = 1;
-        return -1;
-    }
+      // Receive dummy packet to force creating two subflows
 #if DEBUG
-    fprintf(stderr, "accept: MPTCP returned %d available subflows\n", cnt_subflows);
+      fprintf(stderr, "libsmkex: receiving dummy packet to force creating two subflows\n");
+#endif
+      rc = __recv_dummy(accepted_fd);
+      if (rc < 0) {
+          fprintf(stderr, "Error: Could not receive dummy packet.\n");
+          mp_sockets[accepted_fd].used = 0;
+          return -1;
+      }
+#if DEBUG
+      fprintf(stderr, "libsmkex: dummy packet received\n");
 #endif
 
-    // Find IDs of subflows
-    struct mptcp_sub_ids *ids;
-    socklen_t ids_len;
-    ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
-    ids = (struct mptcp_sub_ids *)malloc(ids_len);
-    rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
-    ids0 = ids->sub_status[0].id;
-    ids1 = ids->sub_status[1].id;
-    free(ids); ids = NULL;
-    if(rc < 0)
-    {
-        fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
-        perror("getsockopt");
-        goto err_accept;
-    }
+      // Block while waiting for slave subflows to be ready
+      int slave_count = 2;
+      rc = original_setsockopt(accepted_fd, IPPROTO_TCP, MPTCP_SET_SUB_EST_THRESHOLD,
+          &slave_count, sizeof(int));
+      if (rc < 0) {
+          fprintf(stderr, "Error: could not set slave threshold.\n");
+          mp_sockets[accepted_fd].used = 0;
+          return -1;
+      }
+
 #if DEBUG
-    fprintf(stderr, "accept: MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
-        ids0, ids1);
+      fprintf(stderr, "accept: before poll on socket %d\n", accepted_fd);
 #endif
+
+      // Wait using poll
+      struct pollfd fds[1];
+      memset(fds, 0, sizeof(struct pollfd));
+      fds[0].fd = accepted_fd;
+      fds[0].events |= POLLCONN;
+      poll(fds, 1, -1);
+
+#if DEBUG
+      fprintf(stderr, "accept: after poll on socket %d\n", accepted_fd);
+#endif
+
+      // check number of existing subflows (needed next)
+      int cnt_subflows=0;
+      socklen_t len_sockopt=1;
+      rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_EST_COUNT,
+                      &cnt_subflows, &len_sockopt);
+      if(rc < 0)
+      {
+          fprintf(stderr, "Error: could not retrieve number of MPTCP flows with getsockopt.\n");
+          perror("getsockopt");
+          mp_sockets[accepted_fd].used = 1;
+          return -1;
+      }
+#if DEBUG
+      fprintf(stderr, "accept: MPTCP returned %d available subflows\n", cnt_subflows);
+#endif
+
+      // Find IDs of subflows
+      struct mptcp_sub_ids *ids;
+      socklen_t ids_len;
+      ids_len = sizeof(struct mptcp_sub_ids) + sizeof(struct mptcp_sub_status) * (cnt_subflows+10);
+      ids = (struct mptcp_sub_ids *)malloc(ids_len);
+      rc = getsockopt(accepted_fd, IPPROTO_TCP, MPTCP_GET_SUB_IDS, ids, &ids_len);
+      ids0 = ids->sub_status[0].id;
+      ids1 = ids->sub_status[1].id;
+      free(ids); ids = NULL;
+      if(rc < 0)
+      {
+          fprintf(stderr, "Error %d: could not retrieve MPTCP subflow IDs with getsockopt.\n", rc);
+          perror("getsockopt");
+          goto err_accept;
+      }
+#if DEBUG
+      fprintf(stderr, "accept: MPTCP returned the following IDs for the first two sub-flows: ID1: %d; ID2: %d.\n",
+          ids0, ids1);
+#endif
+    }
+    else
+    {
+      ids0 = 0;
+      ids1 = 0;
+    }
 
     // Perform DH key exchange
     EC_KEY* ec_key = __new_key_pair();
@@ -1001,16 +1021,18 @@ int accept(int sockfd, struct sockaddr* addr, socklen_t* addrlen) {
     else
       mp_sockets[accepted_fd].do_session_attack = 0;
     
-    // Send session info on second channel
-    rc = __send_session_info(accepted_fd, ids1);
-    if (rc < 0) {
-        fprintf(stderr, "Error: could not send session info.\n");
-        goto err_accept;
-    }
-
+    if (mp_sockets[sockfd].dh_only == 0)
+    {
+      // Send session info on second channel
+      rc = __send_session_info(accepted_fd, ids1);
+      if (rc < 0) {
+          fprintf(stderr, "Error: could not send session info.\n");
+          goto err_accept;
+      }
 #if DEBUG
-    fprintf(stderr, "Accept: after send_session_info() on socket %d\n", accepted_fd);
+      fprintf(stderr, "Accept: after send_session_info() on socket %d\n", accepted_fd);
 #endif
+    }
 
 accept_no_crypt:
     mp_sockets[accepted_fd].accepted = 1;
@@ -1234,14 +1256,24 @@ int setsockopt(int sockfd, int level, int option_name, const void *option_value,
         level, option_name, sockfd);
 #endif
 
-    // Check if we are being required to stop crypto.
     if (option_name == SO_SMKEX_NOCRYPT)
     {
+      // Check if we are being required to stop crypto.
 #if DEBUG
       fprintf(stderr,
           "Setsockopt: Received request to stop crypto on socket %d\n", sockfd);
 #endif
       mp_sockets[sockfd].no_crypt = 1;
+      return 0;
+    }
+    if (option_name == SO_SMKEX_DHONLY)
+    {
+      // Check if we are being required to do only DH (no tag/hash on second channel)
+#if DEBUG
+      fprintf(stderr,
+          "Setsockopt: Received request to do only DH on socket %d\n", sockfd);
+#endif
+      mp_sockets[sockfd].dh_only = 1;
       return 0;
     }
     else

@@ -15,13 +15,15 @@
 #include <time.h>
 
 #define BUFFER_SIZE 4096
-#define NEXP 2
+#define NEXP 1000
 
 #define SERVER_PORT     1337
 #define SERVER_IP       "127.0.0.1"
 #define FILENAME        "recv_file"
+#define FILETIME        "time.txt"
 
 #define SO_SMKEX_NOCRYPT 0xA001
+#define SO_SMKEX_DHONLY 0xA002
 
 void my_receive(int sockfd, char * buffer, int length) {
     int bytes_received = 0;
@@ -34,7 +36,7 @@ void my_receive(int sockfd, char * buffer, int length) {
     }
 }
 
-double do_connect(unsigned int server_port, char *server_ip, char *filename, char *fn_res)
+double do_connect(unsigned int server_port, char *server_ip, char *filename, char dh_only)
 {
 
     char buffer[BUFFER_SIZE];
@@ -57,6 +59,14 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     //printf("[client] Setting no encryption on socket %d\n", client_sockfd);
     //ret = setsockopt(client_sockfd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
     //CHECK(ret == 0, "setsockopt");
+    
+    // Set only DH if requested
+    if (dh_only)
+    {
+      printf("[client] Setting DH ONLY on socket %d\n", client_sockfd);
+      ret = setsockopt(client_sockfd, SOL_SOCKET, SO_SMKEX_DHONLY, NULL, 0);
+      CHECK(ret == 0, "setsockopt");
+    }
 
     // Connect
     printf("[client] Before connect()\n");
@@ -69,13 +79,6 @@ double do_connect(unsigned int server_port, char *server_ip, char *filename, cha
     printf("[client] Connected to %d\n", server_port);
     tspent = ((double)(tend - tstart))/CLOCKS_PER_SEC;
     printf("[client] Time to connect: %lf seconds\n", tspent);
-
-    // Open result file and write time there
-    FILE *fd_res = fopen(fn_res, "a+");
-    CHECK(fd_res >= 0, "open");
-    fprintf(fd_res, "%lf\n", tspent);
-    fclose(fd_res);
-    
 
     // Recv file size
     ///*
@@ -109,14 +112,17 @@ int main(int argc, char* argv[]) {
     unsigned int server_port = SERVER_PORT;
     char *server_ip = SERVER_IP;
     char *filename = FILENAME;
+    char *filetime = FILETIME;
     int ret, k;
     double conntime, ttime = 0;
     double times[NEXP];
     double totaltimes[NEXP];
+    char dh_only = 0;
     clock_t tstart, tend;
+    FILE *fd_time;
 
     int opt;
-    while ((opt = getopt(argc, argv, "i:p:f:")) != -1) {
+    while ((opt = getopt(argc, argv, "i:p:f:t:d")) != -1) {
         switch (opt) {
             case 'i':
                 server_ip = optarg;
@@ -127,23 +133,37 @@ int main(int argc, char* argv[]) {
             case 'f':
                 filename = optarg;
                 break;
+            case 't':
+                filetime = optarg;
+                break;
+            case 'd':
+                dh_only = 1;
+                break;
             default:
-                fprintf(stderr, "Usage %s [-i SERVER_IP] [-p PORT] [-f RECV_FILENAME]\n", argv[0]);
+                fprintf(stderr, "Usage %s [-i SERVER_IP] [-p PORT] [-f RECV_FILENAME] [-t TIME_FILENAME] [-d]\n", argv[0]);
                 exit(EXIT_FAILURE);
         }
     }
 
+
+    // Open file for time
+    fd_time = fopen(filetime, "w");
+    CHECK(fd_time != NULL, "fopen");
+
     for (k=0; k < NEXP; k++)
     {
       tstart = clock();
-      conntime = do_connect(server_port, server_ip, filename, "timing_results.txt");
+      conntime = do_connect(server_port, server_ip, filename, dh_only);
       tend = clock();
       ttime += conntime;
       times[k] = conntime;
       totaltimes[k] = ((double)(tend - tstart))/CLOCKS_PER_SEC;
       printf("[client] Time connect(): %lf\n", times[k]);
       printf("[client] Total time connect+transfer: %lf\n", totaltimes[k]);
+      fprintf(fd_time, "%lf\n", times[k]);
     }
+
+    fclose(fd_time);
 
     return 0;
 }
