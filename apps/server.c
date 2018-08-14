@@ -18,7 +18,6 @@
 
 #define BUFFER_SIZE  4096
 
-#define SO_SMKEX_NOCRYPT 0xA001
 #define SO_SMKEX_DHONLY 0xA002
 
 int my_send(int sockfd, char * buffer, int length) {
@@ -84,11 +83,6 @@ int main(int argc, char* argv[]) {
 
     printf("[server] Server listening on port %d...\n", serv_port);
 
-    // Set no encrypt option on server
-    //printf("[server] Setting no encrypt for socket %d\n", listen_fd);
-    //rc = setsockopt(listen_fd, SOL_SOCKET, SO_SMKEX_NOCRYPT, NULL, 0);
-    //CHECK(rc == 0, "setsockopt");
-    
     // Set only DH if requested
     if (dh_only)
     {
