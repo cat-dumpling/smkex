@@ -7,6 +7,7 @@
 #include <openssl/ec.h>
 #include <openssl/hmac.h>
 
+#define KDF_KEY_LENGTH 64
 #define SESSION_KEY_LENGTH 32
 #define SESSION_IV_LENGTH 12
 #define SESSION_TAG_LENGTH 16

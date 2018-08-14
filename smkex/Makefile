@@ -8,3 +8,11 @@ libsmkex.so: libsmkex.o pkt.o crypto.o
 .PHONY: clean
 clean:
 	rm -vf libsmkex.so *.o
+
+get:
+	rsync -Cavuzb vm1:/home/marios/projects/smc/smkex/*.c .
+
+put:
+	rsync -Cavuzb *.c /home/marios/projects/smc/smkex/
+
+sync: get put

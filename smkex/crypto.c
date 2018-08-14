@@ -41,6 +41,11 @@ int mp_aesgcm_encrypt(const unsigned char * ptext,
         const unsigned char * iv,
         unsigned char * ctext,
         size_t * clen) {
+            
+    // Uncomment the following to disable encryption
+    //memcpy(ctext, ptext, plen);
+    //*clen = plen;
+    //return 1;
 
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     OPENSSL_assert(ctx != NULL);
@@ -55,19 +60,19 @@ int mp_aesgcm_encrypt(const unsigned char * ptext,
     int out_len;
     if (!EVP_CipherUpdate(ctx, ctext, &out_len, ptext, plen)) {
         ERR_print_errors_fp(stderr);
-        abort();
+        return -1;
     }
     *clen += out_len;
 
     if (!EVP_CipherFinal_ex(ctx, ctext + *clen, &out_len)) {
         ERR_print_errors_fp(stderr);
-        abort();
+        return -1;
     }
     *clen += out_len;
 
     if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, SESSION_TAG_LENGTH, ctext + *clen)) {
         ERR_print_errors_fp(stderr);
-        abort();
+        return -1;
     }
     *clen += SESSION_TAG_LENGTH;
 
@@ -87,6 +92,11 @@ int mp_aesgcm_decrypt(const unsigned char * ctext,
         const unsigned char * iv,
         unsigned char * ptext,
         size_t * plen) {
+            
+    // Uncomment the following to disable encryption
+    //memcpy(ptext, ctext, clen);
+    //*plen = clen;
+    //return 1;
 
     EVP_CIPHER_CTX * ctx;
     int out_len;
@@ -108,13 +118,13 @@ int mp_aesgcm_decrypt(const unsigned char * ctext,
     /* total ciphertext length is clen - 16 (we omit the GMAC tag) */
     if (!EVP_CipherUpdate(ctx, ptext, &out_len, ctext, clen - SESSION_TAG_LENGTH)) {
         ERR_print_errors_fp(stderr);
-        abort();
+        return -1;
     }
     *plen += out_len;
 
     if (!EVP_CipherFinal_ex(ctx, ptext + out_len, &out_len)) {
         ERR_print_errors_fp(stderr);
-        abort();
+        return -1;
     }
     *plen += out_len;
 
