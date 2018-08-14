@@ -67,7 +67,7 @@ struct mp_socket_s {
     int connected; // for client socket
     int accepted;  // for server socket
 
-    // These are only for debugging purposes -- remove in public version
+    // These are only for debugging purposes -- may be removed in future versions
     int no_crypt; // to signal that we want a standard TCP connection (no encryption)
     int do_session_attack; // used to simulate attacker
     int dh_only; // to signal that we want a standard DH connection (no hash on second channel)
